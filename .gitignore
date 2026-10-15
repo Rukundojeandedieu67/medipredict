@@ -1,0 +1,32 @@
+# Python environments and bytecode
+env/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Frontend dependencies and generated output
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+
+# Local application data and generated ML artifacts
+backend/medipredict.db
+backend/medipredict.db-*
+ml_engine/models_store/*.pkl
+ml_engine/models_store/*.joblib
+
+# Editor and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
