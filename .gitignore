@@ -25,6 +25,9 @@ backend/medipredict.db-*
 ml_engine/models_store/*.pkl
 ml_engine/models_store/*.joblib
 
+# Preserved history from the former nested datasets repository
+/.datasets-git-history/
+
 # Editor and operating system files
 .vscode/
 .idea/

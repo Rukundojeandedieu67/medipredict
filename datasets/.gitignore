@@ -1,0 +1,19 @@
+# Python virtual environment
+env/
+.venv/
+venv/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local environment and editor files
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
