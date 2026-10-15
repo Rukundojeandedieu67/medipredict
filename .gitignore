@@ -33,3 +33,8 @@ ml_engine/models_store/*.joblib
 .idea/
 .DS_Store
 Thumbs.db
+
+# Keep repository guidance and nested readmes local; root README remains shareable
+AGENTS.md
+**/README.md
+!/README.md

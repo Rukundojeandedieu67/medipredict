@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 MediPredict Rwanda — Advanced Facility-Level Time-Series Engine
 --------------------------------------------------------------
@@ -21,41 +21,11 @@ print("=========================================================================
 print("🚀 MEDIPREDICT: BUILDING FACILITY-LEVEL TIME-SERIES DATASET (2026)")
 print("==========================================================================")
 
-# 1. Load NISR Census Baselines & Healthsites
-df_nisr = pd.read_csv(nisr_districts_path)
-
-if os.path.exists(raw_healthsites_path):
-    df_hs = pd.read_csv(raw_healthsites_path)
-    print(f"📦 Loaded HDX Healthsites Registry: {len(df_hs)} facilities found.")
-else:
-    print("⚠️ Healthsites file not found. Generating default facility network...")
-    df_hs = pd.DataFrame()
-
-# 2. Extract and Clean Facility List
-facilities_list = []
-if not df_hs.empty and 'name' in df_hs.columns:
-    # Use real facility names from HDX
-    clean_hs = df_hs.dropna(subset=['name']).head(150) # Top 150 verified facilities
-    for idx, row in clean_hs.iterrows():
-        fac_name = str(row['name']).strip()
-        fac_type = str(row.get('amenity', 'health_center')).replace('_', ' ').title()
-        # Randomly assign to a district if missing in HDX
-        matched_district = np.random.choice(df_nisr['district'].values)
-        facilities_list.append({"facility_name": fac_name, "facility_type": fac_type, "district": matched_district})
-else:
-    # Fallback to key Rwandan health facilities
-    sample_facs = [
-        ("Kacyiru Hospital", "Hospital", "Gasabo"), ("Remera Health Center", "Health Center", "Gasabo"),
-        ("Kimironko Health Center", "Health Center", "Gasabo"), ("Masaka Hospital", "Hospital", "Kicukiro"),
-        ("CHUK Referral Hospital", "Referral Hospital", "Nyarugenge"), ("Huye Health Center", "Health Center", "Huye"),
-        ("CHUB Referral Hospital", "Referral Hospital", "Huye"), ("Rwamagana Hospital", "Hospital", "Rwamagana"),
-        ("Ruhengeri Hospital", "Hospital", "Musanze"), ("Gisenyi Hospital", "Hospital", "Rubavu")
-    ]
-    for name, ftype, dist in sample_facs:
-        facilities_list.append({"facility_name": name, "facility_type": ftype, "district": dist})
-
-df_facilities = pd.DataFrame(facilities_list)
-
+# Load facilities whose district was assigned by the Phase 1 point-in-polygon join.
+facilities_path = "../ml_engine/datasets/processed/facilities.csv"
+if not os.path.exists(facilities_path):
+    raise FileNotFoundError("Spatially joined facility reference table missing; run python ml_engine/pipeline/build_reference_data.py first")
+df_facilities = pd.read_csv(facilities_path).rename(columns={"name": "facility_name", "type": "facility_type"})
 # Merge with NISR Census Baselines
 df_merged_facs = pd.merge(df_facilities, df_nisr, on="district", how="left")
 
@@ -133,3 +103,5 @@ df_ts.to_csv(ts_csv_path, index=False)
 print(f"✅ Successfully created Facility Time-Series Dataset!")
 print(f"📁 File saved: {ts_csv_path}")
 print(f"📊 Total Records: {len(df_ts):,} monthly observations across facilities in Rwanda.")
+
+
