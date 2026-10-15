@@ -1,8 +1,10 @@
 """Train and evaluate the MediPredict stock risk classifier."""
+import os
 from pathlib import Path
 import json
 import pandas as pd
 import joblib
+from dotenv import load_dotenv
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
@@ -11,8 +13,24 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_CANDIDATES = [ROOT / "datasets/processed/medipredict_facility_timeseries_2026.csv", ROOT.parent / "datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv"]
-OUT = ROOT / "models_store"
+
+
+def resolve_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else (ROOT / path).resolve()
+
+
+load_dotenv(ROOT / ".env")
+configured_data_path = os.getenv("ML_ENGINE_TRAINING_DATA_PATH")
+DATA_CANDIDATES = (
+    [resolve_path(configured_data_path)]
+    if configured_data_path
+    else [
+        ROOT / "datasets/processed/medipredict_facility_timeseries_2026.csv",
+        ROOT.parent / "datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv",
+    ]
+)
+OUT = resolve_path(os.getenv("ML_ENGINE_ARTIFACTS_DIR", "models_store"))
 NUMERIC = ["end_of_month_stock_units", "avg_daily_consumption_units", "nisr_under_5_population", "nisr_poverty_rate_pct", "nisr_malaria_prevalence_pct", "rainy_season_active"]
 CATEGORICAL = ["medicine_code", "district", "facility_type"]
 TARGET = "stockout_risk_label"
@@ -20,7 +38,10 @@ TARGET = "stockout_risk_label"
 def main():
     source = next((p for p in DATA_CANDIDATES if p.exists()), None)
     if source is None:
-        raise FileNotFoundError("Facility time-series CSV not found in ml_engine/datasets or datasets/medipredict_data/processed")
+        raise FileNotFoundError(
+            "Facility time-series CSV not found. Set ML_ENGINE_TRAINING_DATA_PATH "
+            "or provide the CSV in ml_engine/datasets or datasets/medipredict_data/processed."
+        )
     data = pd.read_csv(source).dropna(subset=NUMERIC + CATEGORICAL + [TARGET])
     x = data[NUMERIC + CATEGORICAL]
     y = data[TARGET].str.upper()

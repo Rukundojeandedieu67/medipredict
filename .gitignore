@@ -1,40 +1,6 @@
-# Python environments and bytecode
-env/
 .venv/
-venv/
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Local configuration and credentials
-.env
-.env.*
-!.env.example
-!.env.*.example
-
-# Frontend dependencies and generated output
 node_modules/
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-npm-debug.log*
-
-# Local application data and generated ML artifacts
-backend/medipredict.db
-backend/medipredict.db-*
-ml_engine/models_store/*.pkl
-ml_engine/models_store/*.joblib
-
-# Preserved history from the former nested datasets repository
-/.datasets-git-history/
-
-# Editor and operating system files
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Keep repository guidance and nested readmes local; root README remains shareable
-AGENTS.md
-**/README.md
-!/README.md
+__pycache__/
+*.db
+.env
+dist/

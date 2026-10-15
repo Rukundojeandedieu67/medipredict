@@ -1,0 +1,62 @@
+[
+  {
+    "file": "C:\\Users\\ocaen\\projects\\nisrhackaton\\datasets\\datasets\\raw\\boundaries\\hdx_rwa_adm_2006_nisr_wgs1984_20181002_shp.zip",
+    "source": "HDX COD-AB Rwanda (source: NISR)",
+    "url": "https://data.humdata.org/dataset/2768bdfd-6486-4963-8e3d-e63149478eb4/resource/176eaace-708c-46b3-94e9-d5ba91cca08c/download/rwa_adm_2006_nisr_wgs1984_20181002_shp.zip",
+    "note": "Rwanda - Subnational Administrative Boundaries",
+    "status": "downloaded",
+    "bytes": 15483326,
+    "sha256": "7ac36f57ea3723db2ef773f5ae23657cfa21170919106fcfb82dba10cd423fe0",
+    "accessed_utc": "2026-10-15 06:19"
+  },
+  {
+    "file": "C:\\Users\\ocaen\\projects\\nisrhackaton\\datasets\\datasets\\raw\\nisr_dhs_2019_20\\Rwanda DHS 2019-20  Kigali City Profile.pdf",
+    "source": "NISR RDHS 2019-20",
+    "url": "https://statistics.gov.rw/sites/default/files/documents/2025-01/Rwanda%20DHS%202019-20%20%20Kigali%20City%20Profile.pdf",
+    "note": "Rwanda DHS 2019-20 Kigali City Profile.pdf (pdf, 6.19 MB)",
+    "status": "already_present",
+    "bytes": 6485989,
+    "sha256": "ead39f37a103ddbc37f6082547f9fa5adbe0e23bed690026073e73b13135ee2c",
+    "accessed_utc": "2026-10-15 06:09"
+  },
+  {
+    "file": "C:\\Users\\ocaen\\projects\\nisrhackaton\\datasets\\datasets\\raw\\nisr_dhs_2019_20\\Rwanda DHS 2019-20  Southern Province Profile.pdf",
+    "source": "NISR RDHS 2019-20",
+    "url": "https://statistics.gov.rw/sites/default/files/documents/2025-01/Rwanda%20DHS%202019-20%20%20Southern%20Province%20Profile.pdf",
+    "note": "Rwanda DHS 2019-20 Southern Province Profile.pdf (pdf, 6.46 MB)",
+    "status": "already_present",
+    "bytes": 6770673,
+    "sha256": "8afb770c6036d056dd4ff5f52117b0026aa1b522f0dc9c60d75e8fba8f82b792",
+    "accessed_utc": "2026-10-15 06:09"
+  },
+  {
+    "file": "C:\\Users\\ocaen\\projects\\nisrhackaton\\datasets\\datasets\\raw\\nisr_dhs_2019_20\\Rwanda DHS 2019-20 - Western province Profile.pdf",
+    "source": "NISR RDHS 2019-20",
+    "url": "https://statistics.gov.rw/sites/default/files/documents/2025-01/Rwanda%20DHS%202019-20%20-%20Western%20province%20Profile.pdf",
+    "note": "Rwanda DHS 2019-20 - Western province Profile.pdf (pdf, 6.09 MB)",
+    "status": "already_present",
+    "bytes": 6383431,
+    "sha256": "7abfcaa01a425f04d0b9060516c4eea73a549ee66d3d89f5e202601a504a75ff",
+    "accessed_utc": "2026-10-15 06:09"
+  },
+  {
+    "file": "C:\\Users\\ocaen\\projects\\nisrhackaton\\datasets\\datasets\\raw\\nisr_dhs_2019_20\\Rwanda DHS 2019-20_FINAL REPORT_N.pdf",
+    "source": "NISR RDHS 2019-20",
+    "url": "https://statistics.gov.rw/sites/default/files/documents/2025-01/Rwanda%20DHS%202019-20_FINAL%20REPORT_N.pdf",
+    "note": "Rwanda DHS 2019-20_FINAL REPORT_N.pdf (pdf, 5.4 MB)",
+    "status": "already_present",
+    "bytes": 5663915,
+    "sha256": "bb99e3689739558e247dc11867881e65138c0322ffd6d5f986b743d935e4123d",
+    "accessed_utc": "2026-10-15 06:09"
+  },
+  {
+    "file": "C:\\Users\\ocaen\\projects\\nisrhackaton\\datasets\\datasets\\raw\\nisr_dhs_2019_20\\Rwanda Demographic and Health Survey 20192020 _ Key Indicators.pdf",
+    "source": "NISR RDHS 2019-20",
+    "url": "https://statistics.gov.rw/sites/default/files/documents/2025-01/Rwanda%20Demographic%20and%20Health%20Survey%2020192020%20_%20Key%20Indicators.pdf",
+    "note": "Rwanda Demographic and Health Survey 20192020 _ Key Indicators.pdf (pdf, 777.41 KB)",
+    "status": "already_present",
+    "bytes": 796066,
+    "sha256": "b17dd82c3ceebb89a32c68a8b5d063634ff66685ea2271e87ece9fb5abb75d3d",
+    "accessed_utc": "2026-10-15 06:09"
+  }
+]
