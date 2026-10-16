@@ -2,9 +2,11 @@
 
 ## Scope and gate
 
-Profiled only the four requested processed CSVs. No input was modified. No DHS PDF was read or used.
+Profiled the four requested processed CSVs and the supplemental monthly climate output. No input was modified. No DHS PDF was read or used. The original 5-row climate snapshot is retained and profiled for comparison; month-specific joins use the separate refreshed archive file when present.
 
-**STOP: the facility time-series → district climate inner join loses 84.0000% of time-series rows** (5040 of 6000; 960 remain). The allowed maximum is 2.0000%. Do not continue to target construction, model fitting, calibration, test metrics, or bundle export until rainfall coverage is repaired or the join strategy is explicitly changed and reviewed.
+Monthly climate refresh queried daily observations through 2026-10-14; last complete month in the monthly file is 2026-09. To refresh as new archive data becomes available, run `python ml_engine/pipeline/refresh_climate_data.py` from the repo root. The script requests through yesterday and emits only fully observed calendar months for all districts.
+
+**STOP: the facility time-series → district climate inner join loses 10.0000% of time-series rows** (600 of 6000; 5400 remain). The allowed maximum is 2.0000%. Do not continue to target construction, model fitting, calibration, test metrics, or bundle export until rainfall coverage is repaired or the join strategy is explicitly changed and reviewed.
 
 ## Per-file profile
 
@@ -72,6 +74,31 @@ Profiled only the four requested processed CSVs. No input was modified. No DHS P
 
 ### district climate
 
+- File: `datasets/medipredict_data/processed/district_climate_monthly.csv`
+- Shape: 270 rows × 9 columns.
+- Missing cells: 0/2430 (0.0000%).
+- Exact duplicate rows: 0.
+- `is_synthetic` column: present; true share 0.0000%.
+- Columns and pandas dtypes:
+
+| Column | Dtype | Missing | Missing % |
+|---|---|---:|---:|
+| `district` | `str` | 0 | 0.0000% |
+| `reporting_month` | `str` | 0 | 0.0000% |
+| `monthly_rainfall_mm` | `float64` | 0 | 0.0000% |
+| `days_observed` | `int64` | 0 | 0.0000% |
+| `is_complete_month` | `bool` | 0 | 0.0000% |
+| `latest_observed_date` | `str` | 0 | 0.0000% |
+| `data_source` | `str` | 0 | 0.0000% |
+| `retrieved_at_utc` | `str` | 0 | 0.0000% |
+| `is_synthetic` | `bool` | 0 | 0.0000% |
+
+- Date coverage:
+  - `reporting_month`: 2026-01-01 through 2026-09-01 (9 distinct parsed values).
+  - `latest_observed_date`: 2026-10-14 through 2026-10-14 (1 distinct parsed values).
+
+### original district climate snapshot
+
 - File: `datasets/medipredict_data/processed/district_climate_rainfall.csv`
 - Shape: 5 rows × 2 columns.
 - Missing cells: 0/10 (0.0000%).
@@ -115,7 +142,7 @@ Profiled only the four requested processed CSVs. No input was modified. No DHS P
 |---|---|---|
 | Facility time series | `(facility_name, district, medicine_code, reporting_month)`; facility-medicine groups `(facility_name, medicine_code)` | 150 facilities; 4 medicines; 10 months; 600 facility-medicine groups; rows/group sizes {10: 600}; rows/month {'2026-01': 600, '2026-02': 600, '2026-03': 600, '2026-04': 600, '2026-05': 600, '2026-06': 600, '2026-07': 600, '2026-08': 600, '2026-09': 600, '2026-10': 600} |
 | Master dataset | `(district, medicine_code)` | 30 districts; 120 unique district-medicine keys |
-| District climate | `district` | 5 unique districts; covers 5/30 time-series districts; missing: Bugesera, Burera, Gakenke, Gatsibo, Gicumbi, Kamonyi, Karongi, Kayonza, Kirehe, Muhanga, Musanze, Ngoma, Ngororero, Nyabihu, Nyagatare, Nyamagabe, Nyamasheke, Nyanza, Nyaruguru, Rubavu, Ruhango, Rulindo, Rusizi, Rutsiro, Rwamagana |
+| District climate | `district, reporting_month` | 30 unique districts; covers 30/30 time-series districts; 9 months; missing districts: none; missing months: 2026-10 |
 | District census | `district` | 30 unique districts; covers 30/30 time-series districts |
 
 - District spelling mismatch, time series vs census: none; match is exact and case-sensitive.
@@ -123,7 +150,7 @@ Profiled only the four requested processed CSVs. No input was modified. No DHS P
 - District-key row coverage: time series → census 6000/6000 rows; master → census 120/120 rows.
 - Unique district-medicine key coverage: master → time series 120/120 master keys. A row-level join to facility observations is one-to-many and should not be used to duplicate master operational records across facilities.
 - Month format: `str`, values use `YYYY-MM`; coverage is `2026-01` through `2026-10`.
-- No `reporting_month` or equivalent date key exists in the climate, master, or census CSVs. Climate can only be district-joined as a static snapshot; it cannot be joined as observed month-specific rainfall from these inputs.
+- Climate has a `reporting_month` key and is joined by both `district` and `reporting_month`.
 
 The master dataset repeats concepts already available from the other tables. If modeling proceeds after the coverage gate is resolved, use one source per concept:
 
@@ -147,4 +174,4 @@ All four CSVs lack `is_synthetic`; consequently none has a computable explicit s
 
 ## Required stop; next action
 
-The rainfall join loses 84.0000% of time-series rows, exceeding the 2% stop condition. No future target, feature matrix, time split, baseline/model, validation calibration, test metric, permutation importance, or serving artifact was created. First obtain or define a defensible rainfall coverage strategy for all 30 districts and rerun this profile. The current climate file has only 5 of 30 districts and no month key, so forward-looking monthly climate features cannot be established from it.
+The rainfall join loses 10.0000% of time-series rows, exceeding the 2.0000% stop condition. No future target, feature matrix, time split, baseline/model, validation calibration, test metric, permutation importance, or serving artifact was created. First obtain or define complete rainfall coverage for the time-series months and rerun this profile. Partial calendar months are excluded from the new archive output.

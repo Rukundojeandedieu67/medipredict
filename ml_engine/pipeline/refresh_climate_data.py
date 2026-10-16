@@ -155,6 +155,11 @@ def _complete_monthly_rows(
                     "monthly_rainfall_mm": round(month_values[district], 1),
                     "days_observed": expected_days,
                     "is_complete_month": True,
+                    "latest_observed_date": (
+                        latest_common_observation.isoformat()
+                        if latest_common_observation
+                        else ""
+                    ),
                     "data_source": SOURCE_NAME,
                     "retrieved_at_utc": retrieved_at_utc,
                     "is_synthetic": False,

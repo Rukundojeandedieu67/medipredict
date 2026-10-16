@@ -11,11 +11,17 @@ ROOT = Path(__file__).resolve().parents[2]
 PROCESSED = ROOT / "datasets" / "medipredict_data" / "processed"
 REPORT = ROOT / "docs" / "data_profile.md"
 MAX_ALLOWED_JOIN_LOSS = 0.02
+CLIMATE_PATH = (
+    PROCESSED / "district_climate_monthly.csv"
+    if (PROCESSED / "district_climate_monthly.csv").is_file()
+    else PROCESSED / "district_climate_rainfall.csv"
+)
 
 FILES = {
     "facility time series": PROCESSED / "medipredict_facility_timeseries_2026.csv",
     "master dataset": PROCESSED / "medipredict_master_rwanda_dataset.csv",
-    "district climate": PROCESSED / "district_climate_rainfall.csv",
+    "district climate": CLIMATE_PATH,
+    "original district climate snapshot": PROCESSED / "district_climate_rainfall.csv",
     "district census": PROCESSED / "nisr_census_2022_districts.csv",
 }
 
@@ -58,9 +64,9 @@ def _profile_table(name: str, frame: pd.DataFrame, path: Path) -> list[str]:
     date_columns = [
         column
         for column in frame.columns
-        if "date" in column.casefold()
-        or column.casefold() == "month"
-        or column.casefold().endswith("_month")
+        if column.casefold() == "date"
+        or column.casefold().endswith("_date")
+        or column.casefold() == "reporting_month"
     ]
     if date_columns:
         lines.extend(["", "- Date coverage:"])
@@ -97,7 +103,14 @@ def build_report() -> tuple[str, float, int, int]:
     if "district" not in climate or "district" not in census or "district" not in master:
         raise ValueError("A district-based input is missing its district key.")
 
-    matched_ts = ts.merge(climate[["district"]].drop_duplicates(), on="district", how="inner")
+    join_keys = (
+        ["district", "reporting_month"]
+        if "reporting_month" in climate.columns
+        else ["district"]
+    )
+    matched_ts = ts.merge(
+        climate[join_keys].drop_duplicates(), on=join_keys, how="inner"
+    )
     join_loss = 1 - len(matched_ts) / len(ts) if len(ts) else 0
     ts_districts = set(ts["district"].dropna())
     census_districts = set(census["district"].dropna())
@@ -107,6 +120,16 @@ def build_report() -> tuple[str, float, int, int]:
     grouped = ts.groupby(["facility_name", "medicine_code"], dropna=False).size()
     month_counts = ts.groupby("reporting_month", dropna=False).size().sort_index()
     climate_missing = sorted(ts_districts - climate_districts)
+    climate_missing_months = (
+        sorted(set(ts["reporting_month"]) - set(climate["reporting_month"]))
+        if "reporting_month" in climate.columns
+        else []
+    )
+    latest_observed = (
+        climate["latest_observed_date"].dropna().max()
+        if "latest_observed_date" in climate.columns
+        else None
+    )
     census_spelling_mismatches = sorted(ts_districts ^ census_districts)
     master_spelling_mismatches = sorted(ts_districts ^ master_districts)
 
@@ -115,8 +138,22 @@ def build_report() -> tuple[str, float, int, int]:
         "",
         "## Scope and gate",
         "",
-        "Profiled only the four requested processed CSVs. No input was modified. "
-        "No DHS PDF was read or used.",
+        "Profiled the four requested processed CSVs and the supplemental monthly "
+        "climate output. No input was modified. No DHS PDF was read or used. The "
+        "original 5-row climate snapshot is retained and profiled for comparison; "
+        "month-specific joins use the separate refreshed archive file when present.",
+        "",
+        (
+            f"Monthly climate refresh queried daily observations through "
+            f"{latest_observed}; last complete month in the monthly file is "
+            f"{climate['reporting_month'].max()}. To refresh as new archive data "
+            "becomes available, run "
+            "`python ml_engine/pipeline/refresh_climate_data.py` from the repo root. "
+            "The script requests through yesterday and emits only fully observed "
+            "calendar months for all districts."
+            if latest_observed
+            else ""
+        ),
         "",
         f"**STOP: the facility time-series → district climate inner join loses "
         f"{_pct(100 * join_loss)} of time-series rows** "
@@ -148,9 +185,11 @@ def build_report() -> tuple[str, float, int, int]:
             f"| Master dataset | `(district, medicine_code)` | "
             f"{master['district'].nunique()} districts; "
             f"{master[['district', 'medicine_code']].drop_duplicates().shape[0]} unique district-medicine keys |",
-            f"| District climate | `district` | {len(climate_districts)} unique districts; "
+            f"| District climate | `{', '.join(join_keys)}` | {len(climate_districts)} unique districts; "
             f"covers {len(climate_districts & ts_districts)}/{len(ts_districts)} time-series districts; "
-            f"missing: {', '.join(climate_missing)} |",
+            f"{climate['reporting_month'].nunique() if 'reporting_month' in climate.columns else 'no'} "
+            f"months; missing districts: {', '.join(climate_missing) if climate_missing else 'none'}; "
+            f"missing months: {', '.join(climate_missing_months) if climate_missing_months else 'none'} |",
             f"| District census | `district` | {len(census_districts)} unique districts; "
             f"covers {len(census_districts & ts_districts)}/{len(ts_districts)} time-series districts |",
             "",
@@ -170,10 +209,14 @@ def build_report() -> tuple[str, float, int, int]:
             f"- Month format: `{ts['reporting_month'].dtype}`, values use `YYYY-MM`; "
             f"coverage is `{ts['reporting_month'].min()}` through "
             f"`{ts['reporting_month'].max()}`.",
-            "- No `reporting_month` or equivalent date key exists in the climate, "
-            "master, or census CSVs. Climate can only be district-joined as a "
-            "static snapshot; it cannot be joined as observed month-specific "
-            "rainfall from these inputs.",
+            (
+                "- Climate has a `reporting_month` key and is joined by both "
+                "`district` and `reporting_month`."
+                if "reporting_month" in climate.columns
+                else "- No `reporting_month` key exists in climate, master, or census. "
+                "Climate is a static snapshot and cannot be joined as observed "
+                "month-specific rainfall."
+            ),
             "",
             "The master dataset repeats concepts already available from the other "
             "tables. If modeling proceeds after the coverage gate is resolved, "
@@ -215,14 +258,14 @@ def build_report() -> tuple[str, float, int, int]:
             "",
             "## Required stop; next action",
             "",
-            "The rainfall join loses 84.0000% of time-series rows, exceeding the "
-            "2% stop condition. No future target, feature matrix, time split, "
+            f"The rainfall join loses {_pct(100 * join_loss)} of time-series rows, "
+            f"exceeding the {_pct(100 * MAX_ALLOWED_JOIN_LOSS)} stop condition. "
+            "No future target, feature matrix, time split, "
             "baseline/model, validation calibration, test metric, permutation "
             "importance, or serving artifact was created. First obtain or define "
-            "a defensible rainfall coverage strategy for all 30 districts and "
-            "rerun this profile. The current climate file has only 5 of 30 "
-            "districts and no month key, so forward-looking monthly climate "
-            "features cannot be established from it.",
+            "complete rainfall coverage for the time-series months and rerun "
+            "this profile. Partial calendar months are excluded from the new "
+            "archive output.",
             "",
         ]
     )

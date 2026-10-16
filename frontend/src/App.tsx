@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { FeatureImportance, RiskRecord, Summary, TransferCandidate, TrustMetrics, UploadResult } from "./types";
 
@@ -15,11 +15,32 @@ const navItems: { id: View; label: string; icon: IconName }[] = [
 
 async function fetchApi<T>(path: string): Promise<T> {
   const response = await fetch(`/api/v1/${path}`);
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed (${response.status})`);
-  }
+  if (!response.ok) throw new Error(await getResponseError(response));
   return response.json() as Promise<T>;
+}
+
+async function getResponseError(response: Response): Promise<string> {
+  const body = await response.text();
+  if (body) {
+    try {
+      const payload = JSON.parse(body) as { detail?: unknown; message?: unknown };
+      if (typeof payload.detail === "string") return payload.detail;
+      if (typeof payload.message === "string") return payload.message;
+      if (Array.isArray(payload.detail)) {
+        return payload.detail
+          .map((item: unknown) => {
+            if (typeof item === "object" && item !== null && "msg" in item) {
+              return String(item.msg);
+            }
+            return String(item);
+          })
+          .join("; ");
+      }
+    } catch {
+      if (!body.trimStart().startsWith("<")) return body;
+    }
+  }
+  return `Request failed (${response.status}${response.statusText ? ` ${response.statusText}` : ""})`;
 }
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -78,6 +99,7 @@ function App() {
   const [transfers, setTransfers] = useState<TransferCandidate[]>([]);
   const [metrics, setMetrics] = useState<TrustMetrics | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  const [apiConnected, setApiConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [riskFilter, setRiskFilter] = useState("All risk levels");
@@ -88,21 +110,40 @@ function App() {
   const loadData = useCallback(async () => {
     setLoading(true);
     const requests = await Promise.allSettled([
+      fetchApi<{ status: string }>("health"),
       fetchApi<Summary>("inventory/summary"),
       fetchApi<RiskRecord[]>("predictions/risk-register?limit=5000"),
       fetchApi<TransferCandidate[]>("transfers/recommendations"),
       fetchApi<TrustMetrics>("analytics/trust-metrics"),
     ]);
     const messages: string[] = [];
-    const [summaryResult, riskResult, transferResult, metricsResult] = requests;
+    const [healthResult, summaryResult, riskResult, transferResult, metricsResult] = requests;
+    setApiConnected(healthResult.status === "fulfilled" && healthResult.value.status === "ok");
+    if (healthResult.status === "rejected") {
+      messages.push(`API health: ${healthResult.reason instanceof Error ? healthResult.reason.message : "request failed"}`);
+    } else if (healthResult.value.status !== "ok") {
+      messages.push("API health: service did not report an OK status");
+    }
     if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
-    else messages.push(`Inventory summary: ${summaryResult.reason instanceof Error ? summaryResult.reason.message : "request failed"}`);
+    else {
+      setSummary(null);
+      messages.push(`Inventory summary: ${summaryResult.reason instanceof Error ? summaryResult.reason.message : "request failed"}`);
+    }
     if (riskResult.status === "fulfilled") setRisks(riskResult.value);
-    else messages.push(`Risk register: ${riskResult.reason instanceof Error ? riskResult.reason.message : "request failed"}`);
+    else {
+      setRisks([]);
+      messages.push(`Risk register: ${riskResult.reason instanceof Error ? riskResult.reason.message : "request failed"}`);
+    }
     if (transferResult.status === "fulfilled") setTransfers(transferResult.value);
-    else messages.push(`Transfer recommendations: ${transferResult.reason instanceof Error ? transferResult.reason.message : "request failed"}`);
+    else {
+      setTransfers([]);
+      messages.push(`Transfer recommendations: ${transferResult.reason instanceof Error ? transferResult.reason.message : "request failed"}`);
+    }
     if (metricsResult.status === "fulfilled") setMetrics(metricsResult.value);
-    else messages.push(`Model insights: ${metricsResult.reason instanceof Error ? metricsResult.reason.message : "request failed"}`);
+    else {
+      setMetrics(null);
+      messages.push(`Model insights: ${metricsResult.reason instanceof Error ? metricsResult.reason.message : "request failed"}`);
+    }
     setErrors(messages);
     setLoading(false);
   }, []);
@@ -120,15 +161,20 @@ function App() {
     if (!file) return;
     setUploadError("");
     setUpload(null);
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setUploadError("Choose a .csv file.");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setUploadError("The CSV must be smaller than 20 MB.");
+      return;
+    }
     setUploading(true);
     const body = new FormData();
     body.append("file", file);
     try {
       const response = await fetch("/api/v1/data/upload-csv", { method: "POST", body });
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(detail || `Upload failed (${response.status})`);
-      }
+      if (!response.ok) throw new Error(await getResponseError(response));
       setUpload(await response.json() as UploadResult);
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "Upload could not be completed.");
@@ -148,13 +194,13 @@ function App() {
       </a>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="main-nav" aria-label="Main navigation">
-        {navItems.map((item) => <button key={item.id} type="button" className={`nav-link ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}>
+        {navItems.map((item) => <button key={item.id} type="button" title={item.label} aria-label={item.label} aria-current={view === item.id ? "page" : undefined} className={`nav-link ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}>
           <Icon name={item.icon} /><span>{item.label}</span>{item.id === "risk" && summary && <span className="nav-count">{formatNumber(summary.critical)}</span>}
         </button>)}
       </nav>
       <div className="sidebar-bottom">
-        <div className="status-card"><span className={`status-dot ${errors.length ? "offline" : loading ? "loading" : "online"}`} /><div><strong>{errors.length ? "Connection issue" : loading ? "Connecting" : "API connected"}</strong><small>{errors.length ? "Some data unavailable" : "MediPredict API"}</small></div><span className="status-ping" /></div>
-        <div className="profile"><div className="profile-avatar">MP</div><div><strong>Health operations</strong><small>Rwanda workspace</small></div><button className="icon-button profile-menu" title="Workspace options"><span>•••</span></button></div>
+        <div className="status-card" role="status" aria-live="polite"><span className={`status-dot ${!apiConnected && !loading ? "offline" : loading ? "loading" : "online"}`} /><div><strong>{loading ? "Checking connection" : apiConnected ? "API connected" : "API unavailable"}</strong><small>{apiConnected ? "MediPredict API" : "FastAPI service"}</small></div><span className={`status-ping ${!apiConnected && !loading ? "offline" : loading ? "loading" : ""}`} /></div>
+        <div className="profile"><div className="profile-avatar">MP</div><div><strong>Health operations</strong><small>Rwanda workspace</small></div></div>
       </div>
     </aside>
 
@@ -165,7 +211,7 @@ function App() {
       </header>
 
       <div className="page-content">
-        {errors.length > 0 && <div className="error-banner"><Icon name="alert" size={18} /><div><strong>Some dashboard data could not be loaded.</strong><p>{errors.join(" · ")}. Check that the API is running on port 8000, then refresh.</p></div><button className="icon-button" aria-label="Dismiss errors" onClick={() => setErrors([])}><Icon name="close" size={17} /></button></div>}
+        {errors.length > 0 && <div className="error-banner"><Icon name="alert" size={18} /><div><strong>Some dashboard data could not be loaded.</strong><p>{errors.join(" · ")}. Check that the API is running on port 8000, then retry.</p></div><button type="button" className="icon-button" aria-label="Retry loading dashboard data" title="Retry loading dashboard data" onClick={() => void loadData()} disabled={loading}><Icon name="refresh" size={17} /></button></div>}
 
         <div className="data-notice"><span className="notice-icon"><Icon name="alert" size={17} /></span><p><strong>Demonstration data</strong><span>Inventory, consumption, and risk predictions are synthetic. District indicators are unverified seed values. Do not use for operational decisions.</span></p><button type="button" onClick={() => setView("trust")}>Model limitations <Icon name="arrow" size={13} /></button></div>
 
@@ -250,25 +296,31 @@ function TransferView({ rows, loading }: { rows: TransferCandidate[]; loading: b
 }
 
 function TrustView({ metrics, loading }: { metrics: TrustMetrics | null; loading: boolean }) {
-  const features = (metrics?.feature_importances ?? []).slice(0, 8);
+  const metricsAvailable = Boolean(metrics && !metrics.source.toLowerCase().includes("not trained"));
+  const features = (metricsAvailable ? metrics?.feature_importances ?? [] : []).slice(0, 8);
   const maxImportance = Math.max(...features.map((feature) => feature.importance), 0);
   return <section className="view-section">
     <div className="section-intro"><div><div className="eyebrow"><span className="eyebrow-line" />MODEL TRANSPARENCY</div><h1>Model insights<span className="heading-period">.</span></h1><p className="page-subtitle">Understand the current model outputs and their limitations.</p></div><span className="soft-tag"><span className="live-dot" />Transparency</span></div>
     <div className="notice-card"><span className="notice-icon"><Icon name="alert" size={18} /></span><div><strong>Interpret metrics with caution</strong><p>The training data contains synthetic stock and consumption trajectories. Risk labels are derived from those values, so reported metrics are not evidence of real-world predictive performance.</p></div></div>
-    <div className="trust-grid"><article className="panel accuracy-card"><div className="eyebrow small">REPORTED MODEL METRIC</div><h2>Accuracy</h2><div className="accuracy-number">{metrics ? `${(metrics.accuracy * 100).toFixed(1)}<small>%</small>` : "—"}</div><p>Stored training evaluation metric. It should not be interpreted as verified operational performance.</p><div className="metric-source"><span>Evaluation source</span><strong>{metrics?.source ? metrics.source.split(/[\\/]/).pop() : loading ? "Loading…" : "Unavailable"}</strong></div></article>
+    <div className="trust-grid"><article className="panel accuracy-card"><div className="eyebrow small">REPORTED MODEL METRIC</div><h2>Accuracy</h2><div className="accuracy-number">{metricsAvailable && metrics ? <>{(metrics.accuracy * 100).toFixed(1)}<small>%</small></> : "—"}</div><p>{metricsAvailable ? "Stored training evaluation metric. It should not be interpreted as verified operational performance." : "A trained model evaluation is not available yet."}</p><div className="metric-source"><span>Evaluation source</span><strong>{metrics?.source ? metrics.source.split(/[\\/]/).pop() : loading ? "Loading…" : "Unavailable"}</strong></div></article>
       <article className="panel features-card"><div className="panel-heading"><div><div className="eyebrow small">MODEL SIGNALS</div><h2>Feature importance</h2></div><span className="soft-tag">Top {features.length}</span></div>{features.length ? <div className="feature-list">{features.map((feature: FeatureImportance) => <div className="feature-row" key={feature.feature}><div className="feature-label"><span>{readableFeature(feature.feature)}</span><strong>{(feature.importance * 100).toFixed(1)}%</strong></div><div className="feature-track"><span style={{ width: `${maxImportance ? (feature.importance / maxImportance) * 100 : 0}%` }} /></div></div>)}</div> : <EmptyState>{loading ? "Loading model metrics…" : "No feature importance data is available."}</EmptyState>}</article></div>
-    {metrics?.labels.length ? <article className="panel class-metrics"><div className="eyebrow small">CLASS-LEVEL METRICS</div><h2>Precision &amp; recall</h2><div className="class-metric-grid">{metrics.labels.map((label, index) => <div className="class-metric" key={label}><RiskBadge risk={label} /><div><span>Precision</span><strong>{metrics.precision[index] === undefined ? "—" : `${(metrics.precision[index] * 100).toFixed(1)}%`}</strong></div><div><span>Recall</span><strong>{metrics.recall[index] === undefined ? "—" : `${(metrics.recall[index] * 100).toFixed(1)}%`}</strong></div></div>)}</div></article> : null}
+    {metricsAvailable && metrics?.labels.length ? <article className="panel class-metrics"><div className="eyebrow small">CLASS-LEVEL METRICS</div><h2>Precision &amp; recall</h2><div className="class-metric-grid">{metrics.labels.map((label, index) => <div className="class-metric" key={label}><RiskBadge risk={label} /><div><span>Precision</span><strong>{metrics.precision[index] === undefined ? "—" : `${(metrics.precision[index] * 100).toFixed(1)}%`}</strong></div><div><span>Recall</span><strong>{metrics.recall[index] === undefined ? "—" : `${(metrics.recall[index] * 100).toFixed(1)}%`}</strong></div></div>)}</div></article> : null}
   </section>;
 }
 
 function UploadView({ result, error, uploading, onSelect }: { result: UploadResult | null; error: string; uploading: boolean; onSelect: (file?: File) => void }) {
   const [fileName, setFileName] = useState("");
-  const handleFile = (file?: File) => { setFileName(file?.name ?? ""); onSelect(file); };
+  const inputRef = useRef<HTMLInputElement>(null);
+  const handleFile = (file?: File) => {
+    setFileName(file?.name ?? "");
+    onSelect(file);
+    if (inputRef.current) inputRef.current.value = "";
+  };
   return <section className="view-section">
     <div className="section-intro"><div><div className="eyebrow"><span className="eyebrow-line" />DATA INTAKE</div><h1>Upload facility data<span className="heading-period">.</span></h1><p className="page-subtitle">Run a risk assessment on a facility inventory CSV.</p></div></div>
-    <div className="upload-layout"><article className="panel upload-panel"><div className="upload-heading"><span className="upload-symbol"><Icon name="upload" size={23} /></span><div><h2>Import a CSV file</h2><p>Your file is processed for predictions and is not saved by the API.</p></div></div><label className={`dropzone ${uploading ? "is-uploading" : ""}`}><input type="file" accept=".csv,text/csv" disabled={uploading} onChange={(event) => handleFile(event.target.files?.[0])} /><span className="drop-icon"><Icon name="file" size={25} /></span><strong>{uploading ? "Analyzing file…" : fileName || "Choose a CSV file to upload"}</strong><span>{uploading ? "Please wait while predictions are generated" : "Select a file from your computer · CSV format"}</span><span className="browse-button">{uploading ? "Working…" : "Browse files"}</span></label>{error && <div className="inline-error"><Icon name="alert" size={16} />{error}</div>}<div className="required-fields"><strong>Required CSV columns</strong><p>facility_name, district, province, facility_type, medicine_code, medicine_name, end_of_month_stock_units, avg_daily_consumption_units, nisr_under_5_population, nisr_poverty_rate_pct, nisr_malaria_prevalence_pct, rainy_season_active, reporting_month</p></div></article>
+    <div className="upload-layout"><article className="panel upload-panel"><div className="upload-heading"><span className="upload-symbol"><Icon name="upload" size={23} /></span><div><h2>Import a CSV file</h2><p>Your file is processed for predictions and is not saved by the API.</p></div></div><label className={`dropzone ${uploading ? "is-uploading" : ""}`}><input ref={inputRef} type="file" accept=".csv,text/csv" disabled={uploading} onChange={(event) => handleFile(event.target.files?.[0])} /><span className="drop-icon"><Icon name="file" size={25} /></span><strong>{uploading ? "Analyzing file…" : fileName || "Choose a CSV file to upload"}</strong><span>{uploading ? "Please wait while predictions are generated" : "Select a file from your computer · CSV format"}</span><span className="browse-button">{uploading ? "Working…" : "Browse files"}</span></label>{error && <div className="inline-error" role="alert"><Icon name="alert" size={16} />{error}</div>}<div className="required-fields"><strong>Required CSV columns</strong><p>facility_name, district, province, facility_type, medicine_code, medicine_name, end_of_month_stock_units, avg_daily_consumption_units, nisr_under_5_population, nisr_poverty_rate_pct, nisr_malaria_prevalence_pct, rainy_season_active, reporting_month</p></div></article>
       <aside className="upload-aside"><div className="eyebrow small">BEFORE YOU UPLOAD</div><ul><li><span><Icon name="check" size={14} /></span>Use the required column names listed here.</li><li><span><Icon name="check" size={14} /></span>Maximum file size is 20 MB.</li><li><span><Icon name="check" size={14} /></span>Only CSV files are accepted.</li></ul><div className="upload-note"><Icon name="alert" size={17} /><p>Uploaded data is evaluated using the current demonstration model. Outputs are synthetic and must not guide real-world supply decisions.</p></div></aside></div>
-    {result && <article className="panel upload-results"><div className="panel-heading"><div><div className="eyebrow small">ANALYSIS COMPLETE</div><h2>Prediction summary</h2></div><span className="success-tag"><Icon name="check" size={14} />Completed</span></div><div className="upload-stat-grid"><div><span>Records received</span><strong>{formatNumber(result.records_received)}</strong></div><div><span>Predictions generated</span><strong>{formatNumber(result.predictions)}</strong></div><div><span>Critical</span><strong className="text-critical">{formatNumber(result.critical)}</strong></div><div><span>Moderate</span><strong className="text-moderate">{formatNumber(result.moderate)}</strong></div><div><span>Stable</span><strong className="text-stable">{formatNumber(result.stable)}</strong></div></div>{result.items.length > 0 && <div className="table-wrap"><table><thead><tr><th>Facility</th><th>Medicine</th><th>Stock cover</th><th>Risk</th></tr></thead><tbody>{result.items.slice(0, 8).map((item, index) => <tr key={`${item.facility}-${item.medicine_code}-${index}`}><td>{item.facility}<span>{item.district}</span></td><td>{item.medicine}</td><td>{formatDays(item.lead_time_days)}</td><td><RiskBadge risk={item.risk_level} /></td></tr>)}</tbody></table></div>}</article>}
+    {result && <article className="panel upload-results"><div className="panel-heading"><div><div className="eyebrow small">ANALYSIS COMPLETE</div><h2>Prediction summary</h2></div><span className="success-tag"><Icon name="check" size={14} />Completed</span></div><div className="upload-stat-grid"><div><span>Records received</span><strong>{formatNumber(result.records_received)}</strong></div><div><span>Predictions generated</span><strong>{formatNumber(result.predictions)}</strong></div><div><span>Critical</span><strong className="text-critical">{formatNumber(result.critical)}</strong></div><div><span>Moderate</span><strong className="text-moderate">{formatNumber(result.moderate)}</strong></div><div><span>Stable</span><strong className="text-stable">{formatNumber(result.stable)}</strong></div></div>{result.items.length > 0 && <><div className="table-wrap"><table><thead><tr><th>Facility</th><th>Medicine</th><th>Stock cover</th><th>Risk</th></tr></thead><tbody>{result.items.slice(0, 8).map((item, index) => <tr key={`${item.facility}-${item.medicine_code}-${index}`}><td>{item.facility}<span>{item.district}</span></td><td>{item.medicine}</td><td>{formatDays(item.lead_time_days)}</td><td><RiskBadge risk={item.risk_level} /></td></tr>)}</tbody></table></div><div className="panel-footnote">Showing {Math.min(result.items.length, 8)} of {formatNumber(result.predictions)} predicted records.</div></>}</article>}
   </section>;
 }
 
