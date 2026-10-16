@@ -27,7 +27,13 @@ if not os.path.exists(facilities_path):
     raise FileNotFoundError("Spatially joined facility reference table missing; run python ml_engine/pipeline/build_reference_data.py first")
 df_facilities = pd.read_csv(facilities_path).rename(columns={"name": "facility_name", "type": "facility_type"})
 # Merge with NISR Census Baselines
-df_merged_facs = pd.merge(df_facilities, df_nisr, on="district", how="left")
+df_nisr = pd.read_csv(nisr_districts_path)
+df_merged_facs = pd.merge(
+    df_facilities,
+    df_nisr.drop(columns=["province"], errors="ignore"),
+    on="district",
+    how="left",
+)
 
 # 3. Generate 10-Month Historical Time Series (Jan 2026 to Oct 2026)
 months_2026 = [
@@ -93,7 +99,8 @@ for idx, f_row in df_merged_facs.iterrows():
                 "avg_daily_consumption_units": daily_cons,
                 "lead_time_days_remaining": lead_time_days,
                 "stockout_risk_label": risk,
-                "rainy_season_active": 1 if seasonal_multiplier > 1.0 else 0
+                "rainy_season_active": 1 if seasonal_multiplier > 1.0 else 0,
+                "is_synthetic": True
             })
 
 df_ts = pd.DataFrame(time_series_records)
@@ -103,5 +110,3 @@ df_ts.to_csv(ts_csv_path, index=False)
 print(f"✅ Successfully created Facility Time-Series Dataset!")
 print(f"📁 File saved: {ts_csv_path}")
 print(f"📊 Total Records: {len(df_ts):,} monthly observations across facilities in Rwanda.")
-
-

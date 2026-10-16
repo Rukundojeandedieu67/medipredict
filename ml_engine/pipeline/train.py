@@ -1,4 +1,6 @@
 """Train and evaluate the MediPredict stock risk classifier."""
+# Legacy metrics from this trainer are invalid evidence: the split is random and
+# the same-row target is derived from stock/consumption features (label leakage).
 import os
 from pathlib import Path
 import json
@@ -36,6 +38,11 @@ CATEGORICAL = ["medicine_code", "district", "facility_type"]
 TARGET = "stockout_risk_label"
 
 def main():
+    if os.getenv("MEDIPREDICT_ENABLE_LEGACY_TRAINER", "").strip().casefold() != "true":
+        raise SystemExit(
+            "Deprecated trainer disabled. Its random split and same-row label leakage "
+            "make its metrics invalid. Use `python -m ml.train <feature-build-id>`."
+        )
     source = next((p for p in DATA_CANDIDATES if p.exists()), None)
     if source is None:
         raise FileNotFoundError(

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..database import Base
 
@@ -33,6 +33,8 @@ class DailyStockLog(Base):
     stock_units: Mapped[float] = mapped_column(Float)
     daily_consumption: Mapped[float] = mapped_column(Float)
     rainy_season: Mapped[int] = mapped_column(Integer, default=0)
+    is_synthetic: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    data_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     facility: Mapped[Facility] = relationship(back_populates="stock_logs")
     medicine: Mapped[Medicine] = relationship(back_populates="stock_logs")
 
@@ -45,3 +47,5 @@ class Prediction(Base):
     lead_time_days: Mapped[float] = mapped_column(Float)
     risk_level: Mapped[str] = mapped_column(String(20), index=True)
     confidence: Mapped[float] = mapped_column(Float, default=0)
+    is_synthetic: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    data_source: Mapped[str | None] = mapped_column(String(32), nullable=True)

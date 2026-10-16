@@ -1,5 +1,5 @@
 # MediPredict model pipeline
 
-Copy `ml_engine/.env.example` to `ml_engine/.env` to configure the training CSV with `ML_ENGINE_TRAINING_DATA_PATH` and the artifact directory with `ML_ENGINE_ARTIFACTS_DIR`. Relative paths are resolved from `ml_engine`; without an input override, training searches `ml_engine/datasets` and `datasets/medipredict_data/processed`.
+The `ml_engine/pipeline/train.py` trainer is deprecated. Its random row split and same-row label leakage make its metrics invalid evidence. Do not use its metrics or artifact for evaluation or serving.
 
-Run `python ml_engine/pipeline/train.py` from the repository root. Training stores the fitted scikit-learn pipeline and evaluation metrics in `ml_engine/models_store/` by default. The pipeline includes numeric population, poverty, malaria and rainfall features plus categorical medicine, district and facility type features.
+Phase 4 training is `python -m ml.train <feature-build-id>` from the repository root. It requires an explicitly built and validated feature table from `ml.build_dataset` and stores immutable model/evaluation artifacts in `ml/models/`. The legacy artifact is retained but is not valid evidence and is not served.

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlencode
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,6 +15,12 @@ class Settings(BaseSettings):
     model_path: Path = ROOT / "ml_engine/models_store/medipredict_rf_model.pkl"
     metrics_path: Path = ROOT / "ml_engine/models_store/medipredict_metrics.json"
     csv_path: Path = ROOT / "datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv"
+    uploads_path: Path = ROOT / "datasets/uploads"
+    admin_api_key: str | None = None
+    training_min_records: int = 90
+    training_min_records_monthly: int = 24
+    training_min_facility_items: int = 12
+    data_frequency: Literal["daily", "monthly"] = "daily"
 
     model_config = SettingsConfigDict(
         env_prefix="MEDIPREDICT_",
@@ -34,7 +41,7 @@ class Settings(BaseSettings):
         query = urlencode(url.query, doseq=True)
         return f"{url.drivername}:///{resolved_path}" + (f"?{query}" if query else "")
 
-    @field_validator("model_path", "metrics_path", "csv_path", mode="before")
+    @field_validator("model_path", "metrics_path", "csv_path", "uploads_path", mode="before")
     @classmethod
     def resolve_paths_from_repository_root(cls, value: str | Path) -> Path:
         path = Path(value).expanduser()

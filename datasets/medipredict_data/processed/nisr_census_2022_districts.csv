@@ -1,31 +1,31 @@
-province,district,population_2022,under_5_pop,women_15_49,poverty_rate_pct,mutuelle_pct,malaria_prev_pct,delivery_facility_pct
-Kigali City,Gasabo,879932,105591,263979,12.4,89.2,2.1,99.1
-Kigali City,Kicukiro,491831,59019,152467,8.1,91.5,1.4,99.5
-Kigali City,Nyarugenge,374319,44918,112295,15.2,87.4,2.8,98.8
-Southern,Gisagara,397121,51625,99280,43.5,84.1,14.2,96.2
-Southern,Huye,381912,45829,103116,28.7,88.0,8.5,98.1
-Southern,Kamonyi,431012,53876,112063,21.3,86.8,5.1,97.4
-Southern,Muhanga,358433,43011,93192,24.8,87.9,4.8,98.0
-Southern,Nyamagabe,371501,48295,92875,39.1,85.2,3.2,96.8
-Southern,Nyanza,360536,45067,93739,34.2,85.9,11.8,97.1
-Southern,Nyaruguru,318002,41340,79500,41.8,83.7,4.1,95.9
-Southern,Ruhango,363914,45489,94617,30.5,86.1,9.3,97.2
-Western,Karongi,373809,48595,93452,36.4,85.0,6.8,96.5
-Western,Ngororero,369675,48057,92418,42.1,84.3,3.5,95.8
-Western,Nyabihu,331718,41464,82929,33.7,86.5,1.2,97.6
-Western,Nyamasheke,434221,56448,108555,40.8,83.9,8.9,96.1
-Western,Rubavu,546816,71086,142172,25.9,87.1,5.4,98.2
-Western,Rusizi,485529,63118,121382,32.8,85.4,12.1,97.0
-Western,Rutsiro,369018,47972,92254,44.2,82.8,7.3,95.2
-Northern,Burera,387729,48466,96932,38.6,86.0,0.8,96.9
-Northern,Gakenke,361420,43370,90355,31.2,87.2,1.5,97.5
-Northern,Gicumbi,448373,53804,112093,29.4,88.1,2.1,97.8
-Northern,Musanze,476522,57182,123895,22.1,89.4,0.5,98.9
-Northern,Rulindo,339243,40709,84810,26.3,87.8,1.9,98.0
-Eastern,Bugesera,551070,71639,143278,34.1,85.6,18.5,96.7
-Eastern,Gatsibo,551164,74407,137791,37.8,84.7,21.4,96.3
-Eastern,Kayonza,457156,61716,114289,32.5,86.2,19.8,97.0
-Eastern,Kirehe,460860,62216,115215,36.9,85.1,22.1,96.1
-Eastern,Ngoma,404048,52526,101012,33.4,86.0,16.7,96.8
-Eastern,Nyagatare,653809,88264,163452,35.2,85.3,24.3,95.9
-Eastern,Rwamagana,485125,60640,126132,23.6,88.5,12.6,98.1
+province,district,population_2022,under_5_pop,women_15_49,poverty_rate_pct,mutuelle_pct,malaria_prev_pct,delivery_facility_pct,is_synthetic
+Kigali City,Gasabo,879932,105591,263979,12.4,89.2,2.1,99.1,True
+Kigali City,Kicukiro,491831,59019,152467,8.1,91.5,1.4,99.5,True
+Kigali City,Nyarugenge,374319,44918,112295,15.2,87.4,2.8,98.8,True
+Southern,Gisagara,397121,51625,99280,43.5,84.1,14.2,96.2,True
+Southern,Huye,381912,45829,103116,28.7,88.0,8.5,98.1,True
+Southern,Kamonyi,431012,53876,112063,21.3,86.8,5.1,97.4,True
+Southern,Muhanga,358433,43011,93192,24.8,87.9,4.8,98.0,True
+Southern,Nyamagabe,371501,48295,92875,39.1,85.2,3.2,96.8,True
+Southern,Nyanza,360536,45067,93739,34.2,85.9,11.8,97.1,True
+Southern,Nyaruguru,318002,41340,79500,41.8,83.7,4.1,95.9,True
+Southern,Ruhango,363914,45489,94617,30.5,86.1,9.3,97.2,True
+Western,Karongi,373809,48595,93452,36.4,85.0,6.8,96.5,True
+Western,Ngororero,369675,48057,92418,42.1,84.3,3.5,95.8,True
+Western,Nyabihu,331718,41464,82929,33.7,86.5,1.2,97.6,True
+Western,Nyamasheke,434221,56448,108555,40.8,83.9,8.9,96.1,True
+Western,Rubavu,546816,71086,142172,25.9,87.1,5.4,98.2,True
+Western,Rusizi,485529,63118,121382,32.8,85.4,12.1,97.0,True
+Western,Rutsiro,369018,47972,92254,44.2,82.8,7.3,95.2,True
+Northern,Burera,387729,48466,96932,38.6,86.0,0.8,96.9,True
+Northern,Gakenke,361420,43370,90355,31.2,87.2,1.5,97.5,True
+Northern,Gicumbi,448373,53804,112093,29.4,88.1,2.1,97.8,True
+Northern,Musanze,476522,57182,123895,22.1,89.4,0.5,98.9,True
+Northern,Rulindo,339243,40709,84810,26.3,87.8,1.9,98.0,True
+Eastern,Bugesera,551070,71639,143278,34.1,85.6,18.5,96.7,True
+Eastern,Gatsibo,551164,74407,137791,37.8,84.7,21.4,96.3,True
+Eastern,Kayonza,457156,61716,114289,32.5,86.2,19.8,97.0,True
+Eastern,Kirehe,460860,62216,115215,36.9,85.1,22.1,96.1,True
+Eastern,Ngoma,404048,52526,101012,33.4,86.0,16.7,96.8,True
+Eastern,Nyagatare,653809,88264,163452,35.2,85.3,24.3,95.9,True
+Eastern,Rwamagana,485125,60640,126132,23.6,88.5,12.6,98.1,True

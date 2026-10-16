@@ -1,121 +1,121 @@
-district,province,district_population_nisr,under_5_population_nisr,women_reproductive_age_nisr,poverty_headcount_pct_eicv,mutuelle_coverage_pct_eicv,malaria_prevalence_pct_rdhs,medicine_code,medicine_name,unit,current_stock_units,avg_daily_consumption_units,estimated_lead_time_days,predicted_risk_level,pending_depot_orders_units,data_source_verification
-Gasabo,Kigali City,879932,105591,263979,12.4,89.2,2.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,3453,382,9.0,MODERATE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gasabo,Kigali City,879932,105591,263979,12.4,89.2,2.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,14189,316,44.9,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gasabo,Kigali City,879932,105591,263979,12.4,89.2,2.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,6707,348,19.3,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gasabo,Kigali City,879932,105591,263979,12.4,89.2,2.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,10600,316,33.5,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kicukiro,Kigali City,491831,59019,152467,8.1,91.5,1.4,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8721,193,45.2,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kicukiro,Kigali City,491831,59019,152467,8.1,91.5,1.4,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,5044,170,29.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kicukiro,Kigali City,491831,59019,152467,8.1,91.5,1.4,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5463,202,27.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kicukiro,Kigali City,491831,59019,152467,8.1,91.5,1.4,ORS-100,Oral Rehydration Salts + Zinc,Sachet,1669,170,9.8,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyarugenge,Kigali City,374319,44918,112295,15.2,87.4,2.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,5042,176,28.6,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyarugenge,Kigali City,374319,44918,112295,15.2,87.4,2.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,5558,137,40.6,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyarugenge,Kigali City,374319,44918,112295,15.2,87.4,2.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,6187,147,42.1,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyarugenge,Kigali City,374319,44918,112295,15.2,87.4,2.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2199,137,16.1,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gisagara,Southern,397121,51625,99280,43.5,84.1,14.2,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,12745,478,26.7,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gisagara,Southern,397121,51625,99280,43.5,84.1,14.2,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3001,197,15.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gisagara,Southern,397121,51625,99280,43.5,84.1,14.2,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4404,127,34.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gisagara,Southern,397121,51625,99280,43.5,84.1,14.2,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2576,197,13.1,MODERATE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Huye,Southern,381912,45829,103116,28.7,88.0,8.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,5260,290,18.1,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Huye,Southern,381912,45829,103116,28.7,88.0,8.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,4192,157,26.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Huye,Southern,381912,45829,103116,28.7,88.0,8.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,1895,134,14.1,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Huye,Southern,381912,45829,103116,28.7,88.0,8.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3759,157,23.9,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kamonyi,Southern,431012,53876,112063,21.3,86.8,5.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,1048,263,4.0,CRITICAL,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kamonyi,Southern,431012,53876,112063,21.3,86.8,5.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1834,174,10.5,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kamonyi,Southern,431012,53876,112063,21.3,86.8,5.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,1518,145,10.5,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kamonyi,Southern,431012,53876,112063,21.3,86.8,5.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,1625,174,9.3,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Muhanga,Southern,358433,43011,93192,24.8,87.9,4.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,4615,211,21.9,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Muhanga,Southern,358433,43011,93192,24.8,87.9,4.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3892,143,27.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Muhanga,Southern,358433,43011,93192,24.8,87.9,4.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4143,121,34.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Muhanga,Southern,358433,43011,93192,24.8,87.9,4.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2765,143,19.3,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyamagabe,Southern,371501,48295,92875,39.1,85.2,3.2,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,6919,236,29.3,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyamagabe,Southern,371501,48295,92875,39.1,85.2,3.2,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1447,179,8.1,MODERATE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyamagabe,Southern,371501,48295,92875,39.1,85.2,3.2,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4789,119,40.2,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyamagabe,Southern,371501,48295,92875,39.1,85.2,3.2,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6668,179,37.3,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyanza,Southern,360536,45067,93739,34.2,85.9,11.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,5338,351,15.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyanza,Southern,360536,45067,93739,34.2,85.9,11.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1526,161,9.5,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyanza,Southern,360536,45067,93739,34.2,85.9,11.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3505,121,29.0,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyanza,Southern,360536,45067,93739,34.2,85.9,11.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6897,161,42.8,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyaruguru,Southern,318002,41340,79500,41.8,83.7,4.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,9102,220,41.4,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyaruguru,Southern,318002,41340,79500,41.8,83.7,4.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1257,156,8.1,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyaruguru,Southern,318002,41340,79500,41.8,83.7,4.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3371,101,33.4,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyaruguru,Southern,318002,41340,79500,41.8,83.7,4.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2934,156,18.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ruhango,Southern,363914,45489,94617,30.5,86.1,9.3,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,1285,305,4.2,CRITICAL,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ruhango,Southern,363914,45489,94617,30.5,86.1,9.3,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1837,158,11.6,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ruhango,Southern,363914,45489,94617,30.5,86.1,9.3,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,2768,122,22.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ruhango,Southern,363914,45489,94617,30.5,86.1,9.3,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6198,158,39.2,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Karongi,Western,373809,48595,93452,36.4,85.0,6.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,2012,296,6.8,CRITICAL,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Karongi,Western,373809,48595,93452,36.4,85.0,6.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,2056,176,11.7,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Karongi,Western,373809,48595,93452,36.4,85.0,6.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3028,120,25.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Karongi,Western,373809,48595,93452,36.4,85.0,6.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2850,176,16.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ngororero,Western,369675,48057,92418,42.1,84.3,3.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8076,245,33.0,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ngororero,Western,369675,48057,92418,42.1,84.3,3.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,4454,182,24.5,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ngororero,Western,369675,48057,92418,42.1,84.3,3.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4659,118,39.5,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ngororero,Western,369675,48057,92418,42.1,84.3,3.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,924,182,5.1,CRITICAL,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyabihu,Western,331718,41464,82929,33.7,86.5,1.2,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,812,165,4.9,CRITICAL,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyabihu,Western,331718,41464,82929,33.7,86.5,1.2,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,6126,147,41.7,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyabihu,Western,331718,41464,82929,33.7,86.5,1.2,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3788,107,35.4,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyabihu,Western,331718,41464,82929,33.7,86.5,1.2,ORS-100,Oral Rehydration Salts + Zinc,Sachet,1186,147,8.1,MODERATE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyamasheke,Western,434221,56448,108555,40.8,83.9,8.9,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,4321,400,10.8,MODERATE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyamasheke,Western,434221,56448,108555,40.8,83.9,8.9,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7458,211,35.3,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyamasheke,Western,434221,56448,108555,40.8,83.9,8.9,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5118,139,36.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyamasheke,Western,434221,56448,108555,40.8,83.9,8.9,ORS-100,Oral Rehydration Salts + Zinc,Sachet,4406,211,20.9,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rubavu,Western,546816,71086,142172,25.9,87.1,5.4,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,6887,367,18.8,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rubavu,Western,546816,71086,142172,25.9,87.1,5.4,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7563,238,31.8,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rubavu,Western,546816,71086,142172,25.9,87.1,5.4,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3871,186,20.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rubavu,Western,546816,71086,142172,25.9,87.1,5.4,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3320,238,13.9,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rusizi,Western,485529,63118,121382,32.8,85.4,12.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,6565,493,13.3,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rusizi,Western,485529,63118,121382,32.8,85.4,12.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,8562,223,38.4,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rusizi,Western,485529,63118,121382,32.8,85.4,12.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,2088,156,13.4,MODERATE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rusizi,Western,485529,63118,121382,32.8,85.4,12.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3563,223,16.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rutsiro,Western,369018,47972,92254,44.2,82.8,7.3,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,1701,319,5.3,CRITICAL,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rutsiro,Western,369018,47972,92254,44.2,82.8,7.3,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7245,184,39.4,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rutsiro,Western,369018,47972,92254,44.2,82.8,7.3,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,2173,117,18.6,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rutsiro,Western,369018,47972,92254,44.2,82.8,7.3,ORS-100,Oral Rehydration Salts + Zinc,Sachet,7962,184,43.3,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Burera,Northern,387729,48466,96932,38.6,86.0,0.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,2591,193,13.4,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Burera,Northern,387729,48466,96932,38.6,86.0,0.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7340,179,41.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Burera,Northern,387729,48466,96932,38.6,86.0,0.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3629,125,29.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Burera,Northern,387729,48466,96932,38.6,86.0,0.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3713,179,20.7,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gakenke,Northern,361420,43370,90355,31.2,87.2,1.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,2639,174,15.2,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gakenke,Northern,361420,43370,90355,31.2,87.2,1.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3418,151,22.6,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gakenke,Northern,361420,43370,90355,31.2,87.2,1.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5197,117,44.4,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gakenke,Northern,361420,43370,90355,31.2,87.2,1.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2278,151,15.1,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gicumbi,Northern,448373,53804,112093,29.4,88.1,2.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8698,224,38.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gicumbi,Northern,448373,53804,112093,29.4,88.1,2.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3356,185,18.1,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gicumbi,Northern,448373,53804,112093,29.4,88.1,2.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,2787,146,19.1,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gicumbi,Northern,448373,53804,112093,29.4,88.1,2.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3804,185,20.6,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Musanze,Northern,476522,57182,123895,22.1,89.4,0.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8663,195,44.4,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Musanze,Northern,476522,57182,123895,22.1,89.4,0.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,2325,186,12.5,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Musanze,Northern,476522,57182,123895,22.1,89.4,0.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,7146,163,43.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Musanze,Northern,476522,57182,123895,22.1,89.4,0.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6461,186,34.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rulindo,Northern,339243,40709,84810,26.3,87.8,1.9,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,4980,163,30.6,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rulindo,Northern,339243,40709,84810,26.3,87.8,1.9,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3603,137,26.3,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rulindo,Northern,339243,40709,84810,26.3,87.8,1.9,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4143,110,37.7,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rulindo,Northern,339243,40709,84810,26.3,87.8,1.9,ORS-100,Oral Rehydration Salts + Zinc,Sachet,1401,137,10.2,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Bugesera,Eastern,551070,71639,143278,34.1,85.6,18.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,5287,730,7.2,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Bugesera,Eastern,551070,71639,143278,34.1,85.6,18.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1885,256,7.4,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Bugesera,Eastern,551070,71639,143278,34.1,85.6,18.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,818,184,4.4,CRITICAL,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Bugesera,Eastern,551070,71639,143278,34.1,85.6,18.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,5040,256,19.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gatsibo,Eastern,551164,74407,137791,37.8,84.7,21.4,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,17834,858,20.8,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gatsibo,Eastern,551164,74407,137791,37.8,84.7,21.4,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,2657,273,9.7,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gatsibo,Eastern,551164,74407,137791,37.8,84.7,21.4,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3780,176,21.5,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Gatsibo,Eastern,551164,74407,137791,37.8,84.7,21.4,ORS-100,Oral Rehydration Salts + Zinc,Sachet,12093,273,44.3,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kayonza,Eastern,457156,61716,114289,32.5,86.2,19.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,24314,649,37.5,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kayonza,Eastern,457156,61716,114289,32.5,86.2,19.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,8681,218,39.8,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kayonza,Eastern,457156,61716,114289,32.5,86.2,19.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5692,147,38.7,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kayonza,Eastern,457156,61716,114289,32.5,86.2,19.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,9172,218,42.1,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kirehe,Eastern,460860,62216,115215,36.9,85.1,22.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,15699,728,21.6,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kirehe,Eastern,460860,62216,115215,36.9,85.1,22.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1885,227,8.3,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kirehe,Eastern,460860,62216,115215,36.9,85.1,22.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3423,147,23.3,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Kirehe,Eastern,460860,62216,115215,36.9,85.1,22.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6265,227,27.6,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ngoma,Eastern,404048,52526,101012,33.4,86.0,16.7,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,9058,498,18.2,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ngoma,Eastern,404048,52526,101012,33.4,86.0,16.7,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,5546,186,29.8,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ngoma,Eastern,404048,52526,101012,33.4,86.0,16.7,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3509,130,27.0,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Ngoma,Eastern,404048,52526,101012,33.4,86.0,16.7,ORS-100,Oral Rehydration Salts + Zinc,Sachet,4725,186,25.4,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyagatare,Eastern,653809,88264,163452,35.2,85.3,24.3,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,10182,1091,9.3,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyagatare,Eastern,653809,88264,163452,35.2,85.3,24.3,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7981,318,25.1,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyagatare,Eastern,653809,88264,163452,35.2,85.3,24.3,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5675,209,27.2,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Nyagatare,Eastern,653809,88264,163452,35.2,85.3,24.3,ORS-100,Oral Rehydration Salts + Zinc,Sachet,4557,318,14.3,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rwamagana,Eastern,485125,60640,126132,23.6,88.5,12.6,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8099,451,18.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rwamagana,Eastern,485125,60640,126132,23.6,88.5,12.6,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3570,199,17.9,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rwamagana,Eastern,485125,60640,126132,23.6,88.5,12.6,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,7419,164,45.2,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream
-Rwamagana,Eastern,485125,60640,126132,23.6,88.5,12.6,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6277,199,31.5,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream
+district,province,district_population_nisr,under_5_population_nisr,women_reproductive_age_nisr,poverty_headcount_pct_eicv,mutuelle_coverage_pct_eicv,malaria_prevalence_pct_rdhs,medicine_code,medicine_name,unit,current_stock_units,avg_daily_consumption_units,estimated_lead_time_days,predicted_risk_level,pending_depot_orders_units,data_source_verification,is_synthetic
+Gasabo,Kigali City,879932,105591,263979,12.4,89.2,2.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,3453,382,9.0,MODERATE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gasabo,Kigali City,879932,105591,263979,12.4,89.2,2.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,14189,316,44.9,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gasabo,Kigali City,879932,105591,263979,12.4,89.2,2.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,6707,348,19.3,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gasabo,Kigali City,879932,105591,263979,12.4,89.2,2.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,10600,316,33.5,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kicukiro,Kigali City,491831,59019,152467,8.1,91.5,1.4,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8721,193,45.2,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kicukiro,Kigali City,491831,59019,152467,8.1,91.5,1.4,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,5044,170,29.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kicukiro,Kigali City,491831,59019,152467,8.1,91.5,1.4,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5463,202,27.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kicukiro,Kigali City,491831,59019,152467,8.1,91.5,1.4,ORS-100,Oral Rehydration Salts + Zinc,Sachet,1669,170,9.8,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyarugenge,Kigali City,374319,44918,112295,15.2,87.4,2.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,5042,176,28.6,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyarugenge,Kigali City,374319,44918,112295,15.2,87.4,2.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,5558,137,40.6,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyarugenge,Kigali City,374319,44918,112295,15.2,87.4,2.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,6187,147,42.1,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyarugenge,Kigali City,374319,44918,112295,15.2,87.4,2.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2199,137,16.1,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gisagara,Southern,397121,51625,99280,43.5,84.1,14.2,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,12745,478,26.7,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gisagara,Southern,397121,51625,99280,43.5,84.1,14.2,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3001,197,15.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gisagara,Southern,397121,51625,99280,43.5,84.1,14.2,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4404,127,34.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gisagara,Southern,397121,51625,99280,43.5,84.1,14.2,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2576,197,13.1,MODERATE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Huye,Southern,381912,45829,103116,28.7,88.0,8.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,5260,290,18.1,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Huye,Southern,381912,45829,103116,28.7,88.0,8.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,4192,157,26.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Huye,Southern,381912,45829,103116,28.7,88.0,8.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,1895,134,14.1,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Huye,Southern,381912,45829,103116,28.7,88.0,8.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3759,157,23.9,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kamonyi,Southern,431012,53876,112063,21.3,86.8,5.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,1048,263,4.0,CRITICAL,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kamonyi,Southern,431012,53876,112063,21.3,86.8,5.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1834,174,10.5,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kamonyi,Southern,431012,53876,112063,21.3,86.8,5.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,1518,145,10.5,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kamonyi,Southern,431012,53876,112063,21.3,86.8,5.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,1625,174,9.3,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Muhanga,Southern,358433,43011,93192,24.8,87.9,4.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,4615,211,21.9,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Muhanga,Southern,358433,43011,93192,24.8,87.9,4.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3892,143,27.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Muhanga,Southern,358433,43011,93192,24.8,87.9,4.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4143,121,34.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Muhanga,Southern,358433,43011,93192,24.8,87.9,4.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2765,143,19.3,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyamagabe,Southern,371501,48295,92875,39.1,85.2,3.2,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,6919,236,29.3,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyamagabe,Southern,371501,48295,92875,39.1,85.2,3.2,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1447,179,8.1,MODERATE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyamagabe,Southern,371501,48295,92875,39.1,85.2,3.2,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4789,119,40.2,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyamagabe,Southern,371501,48295,92875,39.1,85.2,3.2,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6668,179,37.3,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyanza,Southern,360536,45067,93739,34.2,85.9,11.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,5338,351,15.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyanza,Southern,360536,45067,93739,34.2,85.9,11.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1526,161,9.5,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyanza,Southern,360536,45067,93739,34.2,85.9,11.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3505,121,29.0,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyanza,Southern,360536,45067,93739,34.2,85.9,11.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6897,161,42.8,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyaruguru,Southern,318002,41340,79500,41.8,83.7,4.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,9102,220,41.4,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyaruguru,Southern,318002,41340,79500,41.8,83.7,4.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1257,156,8.1,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyaruguru,Southern,318002,41340,79500,41.8,83.7,4.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3371,101,33.4,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyaruguru,Southern,318002,41340,79500,41.8,83.7,4.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2934,156,18.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ruhango,Southern,363914,45489,94617,30.5,86.1,9.3,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,1285,305,4.2,CRITICAL,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ruhango,Southern,363914,45489,94617,30.5,86.1,9.3,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1837,158,11.6,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ruhango,Southern,363914,45489,94617,30.5,86.1,9.3,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,2768,122,22.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ruhango,Southern,363914,45489,94617,30.5,86.1,9.3,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6198,158,39.2,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Karongi,Western,373809,48595,93452,36.4,85.0,6.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,2012,296,6.8,CRITICAL,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Karongi,Western,373809,48595,93452,36.4,85.0,6.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,2056,176,11.7,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Karongi,Western,373809,48595,93452,36.4,85.0,6.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3028,120,25.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Karongi,Western,373809,48595,93452,36.4,85.0,6.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2850,176,16.2,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ngororero,Western,369675,48057,92418,42.1,84.3,3.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8076,245,33.0,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ngororero,Western,369675,48057,92418,42.1,84.3,3.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,4454,182,24.5,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ngororero,Western,369675,48057,92418,42.1,84.3,3.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4659,118,39.5,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ngororero,Western,369675,48057,92418,42.1,84.3,3.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,924,182,5.1,CRITICAL,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyabihu,Western,331718,41464,82929,33.7,86.5,1.2,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,812,165,4.9,CRITICAL,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyabihu,Western,331718,41464,82929,33.7,86.5,1.2,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,6126,147,41.7,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyabihu,Western,331718,41464,82929,33.7,86.5,1.2,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3788,107,35.4,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyabihu,Western,331718,41464,82929,33.7,86.5,1.2,ORS-100,Oral Rehydration Salts + Zinc,Sachet,1186,147,8.1,MODERATE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyamasheke,Western,434221,56448,108555,40.8,83.9,8.9,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,4321,400,10.8,MODERATE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyamasheke,Western,434221,56448,108555,40.8,83.9,8.9,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7458,211,35.3,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyamasheke,Western,434221,56448,108555,40.8,83.9,8.9,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5118,139,36.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyamasheke,Western,434221,56448,108555,40.8,83.9,8.9,ORS-100,Oral Rehydration Salts + Zinc,Sachet,4406,211,20.9,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rubavu,Western,546816,71086,142172,25.9,87.1,5.4,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,6887,367,18.8,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rubavu,Western,546816,71086,142172,25.9,87.1,5.4,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7563,238,31.8,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rubavu,Western,546816,71086,142172,25.9,87.1,5.4,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3871,186,20.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rubavu,Western,546816,71086,142172,25.9,87.1,5.4,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3320,238,13.9,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rusizi,Western,485529,63118,121382,32.8,85.4,12.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,6565,493,13.3,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rusizi,Western,485529,63118,121382,32.8,85.4,12.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,8562,223,38.4,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rusizi,Western,485529,63118,121382,32.8,85.4,12.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,2088,156,13.4,MODERATE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rusizi,Western,485529,63118,121382,32.8,85.4,12.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3563,223,16.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rutsiro,Western,369018,47972,92254,44.2,82.8,7.3,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,1701,319,5.3,CRITICAL,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rutsiro,Western,369018,47972,92254,44.2,82.8,7.3,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7245,184,39.4,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rutsiro,Western,369018,47972,92254,44.2,82.8,7.3,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,2173,117,18.6,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rutsiro,Western,369018,47972,92254,44.2,82.8,7.3,ORS-100,Oral Rehydration Salts + Zinc,Sachet,7962,184,43.3,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Burera,Northern,387729,48466,96932,38.6,86.0,0.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,2591,193,13.4,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Burera,Northern,387729,48466,96932,38.6,86.0,0.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7340,179,41.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Burera,Northern,387729,48466,96932,38.6,86.0,0.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3629,125,29.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Burera,Northern,387729,48466,96932,38.6,86.0,0.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3713,179,20.7,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gakenke,Northern,361420,43370,90355,31.2,87.2,1.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,2639,174,15.2,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gakenke,Northern,361420,43370,90355,31.2,87.2,1.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3418,151,22.6,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gakenke,Northern,361420,43370,90355,31.2,87.2,1.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5197,117,44.4,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gakenke,Northern,361420,43370,90355,31.2,87.2,1.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,2278,151,15.1,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gicumbi,Northern,448373,53804,112093,29.4,88.1,2.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8698,224,38.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gicumbi,Northern,448373,53804,112093,29.4,88.1,2.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3356,185,18.1,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gicumbi,Northern,448373,53804,112093,29.4,88.1,2.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,2787,146,19.1,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gicumbi,Northern,448373,53804,112093,29.4,88.1,2.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,3804,185,20.6,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Musanze,Northern,476522,57182,123895,22.1,89.4,0.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8663,195,44.4,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Musanze,Northern,476522,57182,123895,22.1,89.4,0.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,2325,186,12.5,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Musanze,Northern,476522,57182,123895,22.1,89.4,0.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,7146,163,43.8,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Musanze,Northern,476522,57182,123895,22.1,89.4,0.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6461,186,34.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rulindo,Northern,339243,40709,84810,26.3,87.8,1.9,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,4980,163,30.6,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rulindo,Northern,339243,40709,84810,26.3,87.8,1.9,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3603,137,26.3,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rulindo,Northern,339243,40709,84810,26.3,87.8,1.9,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,4143,110,37.7,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rulindo,Northern,339243,40709,84810,26.3,87.8,1.9,ORS-100,Oral Rehydration Salts + Zinc,Sachet,1401,137,10.2,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Bugesera,Eastern,551070,71639,143278,34.1,85.6,18.5,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,5287,730,7.2,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Bugesera,Eastern,551070,71639,143278,34.1,85.6,18.5,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1885,256,7.4,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Bugesera,Eastern,551070,71639,143278,34.1,85.6,18.5,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,818,184,4.4,CRITICAL,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Bugesera,Eastern,551070,71639,143278,34.1,85.6,18.5,ORS-100,Oral Rehydration Salts + Zinc,Sachet,5040,256,19.7,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gatsibo,Eastern,551164,74407,137791,37.8,84.7,21.4,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,17834,858,20.8,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gatsibo,Eastern,551164,74407,137791,37.8,84.7,21.4,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,2657,273,9.7,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gatsibo,Eastern,551164,74407,137791,37.8,84.7,21.4,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3780,176,21.5,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Gatsibo,Eastern,551164,74407,137791,37.8,84.7,21.4,ORS-100,Oral Rehydration Salts + Zinc,Sachet,12093,273,44.3,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kayonza,Eastern,457156,61716,114289,32.5,86.2,19.8,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,24314,649,37.5,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kayonza,Eastern,457156,61716,114289,32.5,86.2,19.8,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,8681,218,39.8,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kayonza,Eastern,457156,61716,114289,32.5,86.2,19.8,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5692,147,38.7,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kayonza,Eastern,457156,61716,114289,32.5,86.2,19.8,ORS-100,Oral Rehydration Salts + Zinc,Sachet,9172,218,42.1,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kirehe,Eastern,460860,62216,115215,36.9,85.1,22.1,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,15699,728,21.6,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kirehe,Eastern,460860,62216,115215,36.9,85.1,22.1,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,1885,227,8.3,MODERATE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kirehe,Eastern,460860,62216,115215,36.9,85.1,22.1,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3423,147,23.3,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Kirehe,Eastern,460860,62216,115215,36.9,85.1,22.1,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6265,227,27.6,STABLE,2000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ngoma,Eastern,404048,52526,101012,33.4,86.0,16.7,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,9058,498,18.2,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ngoma,Eastern,404048,52526,101012,33.4,86.0,16.7,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,5546,186,29.8,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ngoma,Eastern,404048,52526,101012,33.4,86.0,16.7,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,3509,130,27.0,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Ngoma,Eastern,404048,52526,101012,33.4,86.0,16.7,ORS-100,Oral Rehydration Salts + Zinc,Sachet,4725,186,25.4,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyagatare,Eastern,653809,88264,163452,35.2,85.3,24.3,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,10182,1091,9.3,MODERATE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyagatare,Eastern,653809,88264,163452,35.2,85.3,24.3,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,7981,318,25.1,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyagatare,Eastern,653809,88264,163452,35.2,85.3,24.3,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,5675,209,27.2,STABLE,1000,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Nyagatare,Eastern,653809,88264,163452,35.2,85.3,24.3,ORS-100,Oral Rehydration Salts + Zinc,Sachet,4557,318,14.3,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rwamagana,Eastern,485125,60640,126132,23.6,88.5,12.6,AL-20120,Artemether/Lumefantrine 20/120mg Tabs,Box of 30,8099,451,18.0,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rwamagana,Eastern,485125,60640,126132,23.6,88.5,12.6,AMX-250,Amoxicillin 250mg Dispersible Tabs,Bottle of 100,3570,199,17.9,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rwamagana,Eastern,485125,60640,126132,23.6,88.5,12.6,OXY-10,Oxytocin Injection 10IU/ml Ampoule,Ampoule,7419,164,45.2,STABLE,500,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True
+Rwamagana,Eastern,485125,60640,126132,23.6,88.5,12.6,ORS-100,Oral Rehydration Salts + Zinc,Sachet,6277,199,31.5,STABLE,0,NISR Census 2022 + RDHS + e-LMIS Fused Stream,True

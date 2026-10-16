@@ -4,3 +4,7 @@ __pycache__/
 *.db
 .env
 dist/
+backups/
+datasets/uploads/
+ml/artifacts/
+ml/models/

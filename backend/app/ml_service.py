@@ -1,22 +1,100 @@
 """Model loading, feature mapping, and stock risk inference."""
 import json
+import logging
 from functools import lru_cache
+
 import joblib
 import pandas as pd
 from .config import settings
 
+logger = logging.getLogger(__name__)
+REQUIRED_MODEL_METADATA = (
+    "time_based_split",
+    "test_metrics",
+    "training_date_range",
+    "data_hash",
+    "feature_list",
+    "horizon_days",
+    "is_synthetic",
+)
+
+
 @lru_cache(maxsize=1)
+def get_model_bundle() -> tuple[object | None, dict | None]:
+    if not settings.model_path.exists():
+        return None, None
+
+    metadata: dict = {}
+    try:
+        metadata = json.loads(settings.metrics_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Model artifact rejected: metadata could not be read: %s", exc)
+
+    missing = [field for field in REQUIRED_MODEL_METADATA if field not in metadata]
+    if missing:
+        logger.warning(
+            "Model artifact rejected; missing required metadata fields: %s",
+            ", ".join(missing),
+        )
+        return None, None
+
+    test_metrics = metadata["test_metrics"]
+    invalid = []
+    if metadata["time_based_split"] is not True:
+        invalid.append("time_based_split")
+    if not isinstance(test_metrics, dict) or not all(
+        isinstance(test_metrics.get(name), (int, float))
+        for name in ("pr_auc", "roc_auc")
+    ):
+        invalid.append("test_metrics.pr_auc/test_metrics.roc_auc")
+    if not isinstance(metadata["training_date_range"], (str, dict)) or not metadata["training_date_range"]:
+        invalid.append("training_date_range")
+    if not isinstance(metadata["data_hash"], str) or not metadata["data_hash"]:
+        invalid.append("data_hash")
+    if not isinstance(metadata["feature_list"], list) or not metadata["feature_list"]:
+        invalid.append("feature_list")
+    if not isinstance(metadata["horizon_days"], int) or metadata["horizon_days"] <= 0:
+        invalid.append("horizon_days")
+    if not isinstance(metadata["is_synthetic"], bool):
+        invalid.append("is_synthetic")
+    if invalid:
+        logger.warning(
+            "Model artifact rejected; invalid metadata fields: %s",
+            ", ".join(invalid),
+        )
+        return None, None
+    if metadata["is_synthetic"]:
+        logger.warning(
+            "Model artifact rejected; is_synthetic=true does not validate real-world performance"
+        )
+        return None, None
+
+    try:
+        return joblib.load(settings.model_path), metadata
+    except Exception:
+        logger.exception("Model artifact could not be loaded; using rule-based fallback")
+        return None, None
+
+
 def get_model():
-    if settings.model_path.exists(): return joblib.load(settings.model_path)
-    return None
+    return get_model_bundle()[0]
 
 def risk_from_lead_time(days: float) -> str:
     if days < 7: return "CRITICAL"
     if days <= 14: return "MODERATE"
     return "STABLE"
 
-def infer(records: list[dict]) -> list[dict]:
-    model = get_model()
+def parse_is_synthetic(value: object) -> bool:
+    normalized = str(value).strip().casefold()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise ValueError("accepted values are true or false (case-insensitive)")
+
+
+def infer(records: list[dict], data_source: str | None = None) -> list[dict]:
+    model, metadata = get_model_bundle()
     features = pd.DataFrame([{
         "end_of_month_stock_units": float(r.get("stock_units", r.get("end_of_month_stock_units", 0))),
         "avg_daily_consumption_units": float(r.get("daily_consumption", r.get("avg_daily_consumption_units", 0))),
@@ -28,17 +106,52 @@ def infer(records: list[dict]) -> list[dict]:
         "facility_type": r.get("facility_type", "Health Center")
     } for r in records])
     lead_times = [float(row["end_of_month_stock_units"]) / max(float(row["avg_daily_consumption_units"]), 0.01) for _, row in features.iterrows()]
-    if model is not None:
-        probabilities = model.predict_proba(features)
-        classes = list(model.classes_)
+    if model is not None and metadata is not None:
         labels = model.predict(features)
-        confidence = [float(probabilities[i][classes.index(labels[i])]) for i in range(len(labels))]
+        confidence = [None for _ in labels]
+        method = "ml_model"
+        model_version = metadata.get("model_version")
+        if not isinstance(model_version, str):
+            model_version = None
+        model_validated = True
+        confidence_note = "Calibrated confidence is unavailable for this model artifact."
     else:
         labels = [risk_from_lead_time(days) for days in lead_times]
-        confidence = [0.75 for _ in labels]
-    return [{**r, "lead_time_days": round(lead_times[i], 1), "risk_level": str(labels[i]), "confidence": round(confidence[i], 3)} for i, r in enumerate(records)]
+        confidence = [None for _ in labels]
+        method = "rule_based_fallback"
+        model_version = None
+        model_validated = False
+        confidence_note = (
+            "Rule-based days-of-cover estimate using fixed thresholds (<7, 7-14, >14 days). "
+            "Not a probability."
+        )
+
+    assessed = []
+    for i, record in enumerate(records):
+        is_synthetic = parse_is_synthetic(record["is_synthetic"])
+        source = data_source or ("synthetic" if is_synthetic else "real")
+        assessed.append({
+            **record,
+            "lead_time_days": round(lead_times[i], 1),
+            "risk_level": str(labels[i]),
+            "confidence": confidence[i],
+            "method": method,
+            "model_version": model_version,
+            "model_validated": model_validated,
+            "data_source": source,
+            "is_synthetic": is_synthetic,
+            "confidence_note": confidence_note,
+        })
+    return assessed
 
 def load_metrics() -> dict:
-    if settings.metrics_path.exists():
-        return json.loads(settings.metrics_path.read_text(encoding="utf-8"))
-    return {"accuracy": 0, "labels": ["CRITICAL", "MODERATE", "STABLE"], "precision": [0,0,0], "recall": [0,0,0], "confusion_matrix": [[0,0,0],[0,0,0],[0,0,0]], "feature_names": [], "feature_importances": [], "source": "Model artifacts are not trained yet"}
+    return {
+        "accuracy": None,
+        "labels": [],
+        "precision": [],
+        "recall": [],
+        "confusion_matrix": [],
+        "feature_names": [],
+        "feature_importances": [],
+        "source": "No validated model metrics are available.",
+    }

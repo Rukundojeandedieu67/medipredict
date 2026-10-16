@@ -1,17 +1,36 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+import hashlib
+import hmac
+import json
+import logging
 from pathlib import Path
 import io
+import uuid
+
 import pandas as pd
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import settings
 from .database import Base, engine, get_db
 from . import models
-from .ml_service import infer, load_metrics
-from .schemas.api import Summary, RiskRecord, UploadResult, TransferCandidate, TrustMetrics
+from .ml_service import infer, load_metrics, parse_is_synthetic, risk_from_lead_time
+from .schemas.api import (
+    CsvAssessmentItem,
+    CsvAssessmentResult,
+    CsvValidationReport,
+    Summary,
+    RiskRecord,
+    TransferCandidate,
+    TrainingUploadResult,
+    TrustMetrics,
+)
+from .validation import ValidationConfig, validate_inventory_csv
 
+logger = logging.getLogger(__name__)
+MAX_CSV_BYTES = 20 * 1024 * 1024
 CSV_COLUMNS = {"facility_name": "facility", "district": "district", "province": "province", "facility_type": "facility_type", "medicine_code": "medicine_code", "medicine_name": "medicine", "end_of_month_stock_units": "stock_units", "avg_daily_consumption_units": "daily_consumption", "nisr_under_5_population": "under5_population", "nisr_poverty_rate_pct": "poverty_rate", "nisr_malaria_prevalence_pct": "malaria_prevalence", "rainy_season_active": "rainy_season", "reporting_month": "reporting_date"}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,6 +42,12 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow
 def load_rows() -> list[dict]:
     if not settings.csv_path.exists(): return []
     df = pd.read_csv(settings.csv_path)
+    if "is_synthetic" not in df.columns:
+        raise RuntimeError("Operational CSV is missing required provenance column: is_synthetic")
+    try:
+        df["is_synthetic"] = [parse_is_synthetic(value) for value in df["is_synthetic"]]
+    except ValueError as exc:
+        raise RuntimeError(f"Operational CSV has invalid is_synthetic value: {exc}") from exc
     df = df.sort_values("reporting_month").groupby(["facility_name", "medicine_code"], as_index=False).tail(1)
     df = df.rename(columns=CSV_COLUMNS)
     rows = df.to_dict(orient="records")
@@ -31,11 +56,18 @@ def load_rows() -> list[dict]:
 @app.get("/api/v1/health")
 async def health(): return {"status": "ok", "service": settings.app_name}
 
+def provenance_summary(rows: list[dict]) -> tuple[str | None, bool | None]:
+    if not rows:
+        return None, None
+    flags = [bool(row["is_synthetic"]) for row in rows]
+    return ("synthetic" if any(flags) else "real"), any(flags)
+
 @app.get("/api/v1/inventory/summary", response_model=Summary)
 async def inventory_summary(db: Session = Depends(get_db)):
     rows = load_rows()
-    if not rows: return Summary(facilities=0,districts=0,medicines=0,critical=0,moderate=0,stable=0,stock_units=0,reporting_date="—")
-    return Summary(facilities=len({r["facility"] for r in rows}), districts=len({r["district"] for r in rows}), medicines=len({r["medicine_code"] for r in rows}), critical=sum(r["risk_level"]=="CRITICAL" for r in rows), moderate=sum(r["risk_level"]=="MODERATE" for r in rows), stable=sum(r["risk_level"]=="STABLE" for r in rows), stock_units=int(sum(r["stock_units"] for r in rows)), reporting_date=str(max(r["reporting_date"] for r in rows)))
+    if not rows: return Summary(facilities=0,districts=0,medicines=0,critical=0,moderate=0,stable=0,stock_units=0,reporting_date="—",data_source=None,is_synthetic=None)
+    data_source, is_synthetic = provenance_summary(rows)
+    return Summary(facilities=len({r["facility"] for r in rows}), districts=len({r["district"] for r in rows}), medicines=len({r["medicine_code"] for r in rows}), critical=sum(r["risk_level"]=="CRITICAL" for r in rows), moderate=sum(r["risk_level"]=="MODERATE" for r in rows), stable=sum(r["risk_level"]=="STABLE" for r in rows), stock_units=int(sum(r["stock_units"] for r in rows)), reporting_date=str(max(r["reporting_date"] for r in rows)),data_source=data_source,is_synthetic=is_synthetic)
 
 @app.get("/api/v1/predictions/risk-register", response_model=list[RiskRecord])
 async def risk_register(risk: str | None = Query(default=None), district: str | None = Query(default=None), search: str | None = Query(default=None), limit: int = Query(default=500, ge=1, le=5000)):
@@ -45,20 +77,214 @@ async def risk_register(risk: str | None = Query(default=None), district: str | 
     if search: rows = [r for r in rows if search.casefold() in (r["facility"]+r["medicine"]+r["district"]).casefold()]
     return sorted(rows, key=lambda r: (0 if r["risk_level"]=="CRITICAL" else 1 if r["risk_level"]=="MODERATE" else 2, r["lead_time_days"]))[:limit]
 
-@app.post("/api/v1/data/upload-csv", response_model=UploadResult)
-async def upload_csv(file: UploadFile = File(...)):
-    if not file.filename or Path(file.filename).suffix.casefold() != ".csv": raise HTTPException(400, "Upload a .csv file")
+def _validation_config() -> ValidationConfig:
+    return ValidationConfig(
+        minimum_records_per_facility_item=(
+            settings.training_min_records
+            if settings.data_frequency == "daily"
+            else settings.training_min_records_monthly
+        ),
+        minimum_facility_items=settings.training_min_facility_items,
+        data_frequency=settings.data_frequency,
+    )
+
+
+async def _read_csv(file: UploadFile) -> tuple[bytes, pd.DataFrame]:
+    if not file.filename or Path(file.filename).suffix.casefold() != ".csv":
+        raise HTTPException(400, "Upload a .csv file")
     try:
         content = await file.read()
-        if len(content) > 20 * 1024 * 1024: raise HTTPException(413, "CSV must be smaller than 20 MB")
-        frame = pd.read_csv(io.BytesIO(content))
-        missing = [key for key in CSV_COLUMNS if key not in frame.columns]
-        if missing: raise HTTPException(422, f"Missing required columns: {', '.join(missing)}")
-        rows = frame.rename(columns=CSV_COLUMNS).to_dict(orient="records")
-        rows = infer(rows)
-        return UploadResult(records_received=len(rows), predictions=len(rows), critical=sum(x["risk_level"]=="CRITICAL" for x in rows), moderate=sum(x["risk_level"]=="MODERATE" for x in rows), stable=sum(x["risk_level"]=="STABLE" for x in rows), items=rows[:500])
+        if len(content) > MAX_CSV_BYTES:
+            raise HTTPException(413, "CSV must be smaller than 20 MB")
+        frame = pd.read_csv(
+            io.BytesIO(content),
+            dtype=str,
+            keep_default_na=False,
+        )
+        return content, frame
     except HTTPException: raise
     except Exception as exc: raise HTTPException(422, f"Could not parse CSV: {exc}") from exc
+
+
+def _validation_report(
+    frame: pd.DataFrame,
+    purpose: str,
+) -> CsvValidationReport:
+    return CsvValidationReport.model_validate(
+        validate_inventory_csv(
+            frame,
+            purpose=purpose,
+            config=_validation_config(),
+        )
+    )
+
+
+def _assessment_result(
+    frame: pd.DataFrame,
+    report: CsvValidationReport,
+) -> CsvAssessmentResult:
+    if not report.valid:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "CSV validation failed.", "validation": report.model_dump()},
+        )
+
+    items = []
+    confidence_note = (
+        "Rule-based days-of-cover estimate using fixed thresholds (<7, 7-14, >14 days). "
+        "Not a probability."
+    )
+    for _, row in frame.iterrows():
+        stock = float(row["stock_on_hand"])
+        consumed = float(row["units_consumed"])
+        lead_time = stock / consumed if consumed > 0 else None
+        risk = risk_from_lead_time(lead_time) if lead_time is not None else "STABLE"
+        synthetic = parse_is_synthetic(row["is_synthetic"])
+        explicit_stockout = (
+            parse_is_synthetic(row["stockout_flag"])
+            if "stockout_flag" in frame.columns
+            else stock == 0
+        )
+        items.append(
+            CsvAssessmentItem(
+                facility_id=row["facility_id"].strip(),
+                item_id=row["item_id"].strip(),
+                date=row["date"],
+                stock_on_hand=stock,
+                units_consumed=consumed,
+                units_received=float(row["units_received"]),
+                stockout_flag=explicit_stockout,
+                lead_time_days=lead_time,
+                risk_level=risk,
+                confidence=None,
+                confidence_note=confidence_note,
+                method="rule_based_fallback",
+                model_version=None,
+                model_validated=False,
+                data_source="uploaded",
+                is_synthetic=synthetic,
+                facility_type=row.get("facility_type") or None,
+                region=row.get("region") or None,
+                reorder_level=(
+                    float(row["reorder_level"])
+                    if row.get("reorder_level", "").strip()
+                    else None
+                ),
+                stockout_flag_assumption=(
+                    None
+                    if "stockout_flag" in frame.columns
+                    else "Assumed stockout_flag = (stock_on_hand == 0)."
+                ),
+            )
+        )
+
+    synthetic_values = {item.is_synthetic for item in items}
+    return CsvAssessmentResult(
+        records_received=len(items),
+        predictions=len(items),
+        critical=sum(item.risk_level == "CRITICAL" for item in items),
+        moderate=sum(item.risk_level == "MODERATE" for item in items),
+        stable=sum(item.risk_level == "STABLE" for item in items),
+        method="rule_based_fallback",
+        model_version=None,
+        model_validated=False,
+        data_source="uploaded",
+        is_synthetic=next(iter(synthetic_values)) if len(synthetic_values) == 1 else None,
+        confidence_note=confidence_note,
+        validation=report,
+        items=items,
+    )
+
+
+@app.post("/api/v1/data/assess-csv", response_model=CsvAssessmentResult)
+async def assess_csv(file: UploadFile = File(...)):
+    _, frame = await _read_csv(file)
+    report = _validation_report(frame, "assessment")
+    if report.data_frequency == "monthly":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Rule-based CSV assessment currently supports daily-frequency data only. "
+                "Monthly data can be validated and prepared for feature analysis."
+            ),
+        )
+    return _assessment_result(frame, report)
+
+
+@app.post("/api/v1/data/validate-csv", response_model=CsvValidationReport)
+async def validate_csv(
+    file: UploadFile = File(...),
+    purpose: str = Query(default="assessment", pattern="^(assessment|training)$"),
+):
+    _, frame = await _read_csv(file)
+    return _validation_report(frame, purpose)
+
+
+def _require_admin(api_key: str | None) -> None:
+    if not settings.admin_api_key:
+        raise HTTPException(503, "Training upload is disabled: admin API key is not configured.")
+    if api_key is None or not hmac.compare_digest(api_key, settings.admin_api_key):
+        raise HTTPException(403, "Admin API key is missing or invalid.")
+
+
+@app.post("/api/v1/data/training-upload", response_model=TrainingUploadResult)
+async def training_upload(
+    file: UploadFile = File(...),
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    x_uploader: str | None = Header(default=None, alias="X-Uploader"),
+):
+    _require_admin(x_admin_api_key)
+    content, frame = await _read_csv(file)
+    report = _validation_report(frame, "training")
+    if not report.valid:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Training CSV validation failed.", "validation": report.model_dump()},
+        )
+
+    dataset_id = f"v1-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex}"
+    dataset_dir = settings.uploads_path / "v1" / dataset_id
+    dataset_dir.mkdir(parents=True, exist_ok=False)
+    data_path = dataset_dir / "data.csv"
+    metadata_path = dataset_dir / "metadata.json"
+    digest = hashlib.sha256(content).hexdigest()
+    synthetic = report.is_synthetic
+    metadata = {
+        "dataset_id": dataset_id,
+        "sha256": digest,
+        "uploader": (x_uploader or "admin").strip()[:160],
+        "uploaded_at_utc": datetime.now(timezone.utc).isoformat(),
+        "row_count": report.row_count,
+        "date_range": report.date_range,
+        "data_frequency": report.data_frequency,
+        "is_synthetic": synthetic,
+        "data_source": "uploaded",
+    }
+    with data_path.open("xb") as destination:
+        destination.write(content)
+    with metadata_path.open("x", encoding="utf-8") as destination:
+        json.dump(metadata, destination, indent=2)
+
+    return TrainingUploadResult(
+        dataset_id=dataset_id,
+        sha256=digest,
+        row_count=report.row_count,
+        date_range=report.date_range,
+        data_frequency=report.data_frequency,
+        is_synthetic=synthetic,
+        data_source="uploaded",
+        metadata_path=metadata_path.relative_to(settings.uploads_path).as_posix(),
+    )
+
+
+@app.post(
+    "/api/v1/data/upload-csv",
+    response_model=CsvAssessmentResult,
+    deprecated=True,
+)
+async def upload_csv(file: UploadFile = File(...)):
+    logger.warning("Deprecated endpoint /api/v1/data/upload-csv used; use /assess-csv.")
+    return await assess_csv(file)
 
 @app.get("/api/v1/transfers/recommendations", response_model=list[TransferCandidate])
 async def transfer_recommendations():
@@ -71,7 +297,9 @@ async def transfer_recommendations():
         for recipient, donor in zip(recipients, donors):
             if donor["facility"] == recipient["facility"]: continue
             units = max(0, int(min(donor["stock_units"] - donor["daily_consumption"]*30, recipient["daily_consumption"]*14-recipient["stock_units"])))
-            if units: recommendations.append(TransferCandidate(donor_facility=donor["facility"],donor_district=donor["district"],recipient_facility=recipient["facility"],recipient_district=recipient["district"],medicine=recipient["medicine"],available_units=units,requested_units=units,donor_lead_time_days=donor["lead_time_days"],recipient_lead_time_days=recipient["lead_time_days"]))
+            if units:
+                is_synthetic = bool(donor["is_synthetic"] or recipient["is_synthetic"])
+                recommendations.append(TransferCandidate(donor_facility=donor["facility"],donor_district=donor["district"],recipient_facility=recipient["facility"],recipient_district=recipient["district"],medicine=recipient["medicine"],available_units=units,requested_units=units,donor_lead_time_days=donor["lead_time_days"],recipient_lead_time_days=recipient["lead_time_days"],data_source="synthetic" if is_synthetic else "real",is_synthetic=is_synthetic))
     return recommendations[:100]
 
 @app.get("/api/v1/analytics/trust-metrics", response_model=TrustMetrics)

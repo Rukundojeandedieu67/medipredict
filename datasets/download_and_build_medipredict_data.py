@@ -130,6 +130,7 @@ nisr_district_db = [
 ]
 
 df_nisr = pd.DataFrame(nisr_district_db)
+df_nisr["is_synthetic"] = True
 nisr_csv_path = f"{DATA_DIR}/processed/nisr_census_2022_districts.csv"
 df_nisr.to_csv(nisr_csv_path, index=False)
 print(f"   ✅ Processed & saved NISR Census Data for all {len(df_nisr)} Districts of Rwanda! (Total Pop: {df_nisr['population_2022'].sum():,})")
@@ -238,7 +239,8 @@ for idx, d_row in df_nisr.iterrows():
             "estimated_lead_time_days": days_remaining,
             "predicted_risk_level": risk_level,
             "pending_depot_orders_units": np.random.choice([0, 500, 1000, 2000], p=[0.4, 0.3, 0.2, 0.1]),
-            "data_source_verification": "NISR Census 2022 + RDHS + e-LMIS Fused Stream"
+            "data_source_verification": "NISR Census 2022 + RDHS + e-LMIS Fused Stream",
+            "is_synthetic": True
         })
 
 df_master = pd.DataFrame(master_records)

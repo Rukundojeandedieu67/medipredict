@@ -1,0 +1,19 @@
+{
+  "source_notes": [
+    "Season months follow the user-provided Rwanda definition; confirm with RMS / Rwanda Biomedical Centre / MoH before operational use.",
+    "Umuganda dates, national commemoration period dates, and public holidays are intentionally empty pending verified calendar sources.",
+    "Calendar date coverage must be explicitly declared in calendar_coverage_years."
+  ],
+  "calendar_coverage_years": [],
+  "umuganda_last_saturday_enabled": true,
+  "umuganda_rule_source_note": "Configured convention requested for this project; confirm its operational use with RMS / RBC / MoH.",
+  "seasons": [
+    {"name": "long_rains", "months": [3, 4, 5]},
+    {"name": "short_dry", "months": [6, 7, 8]},
+    {"name": "short_rains", "months": [9, 10, 11]},
+    {"name": "long_dry", "months": [12, 1, 2]}
+  ],
+  "umuganda_weeks": [],
+  "national_commemoration_periods": [],
+  "public_holidays": []
+}

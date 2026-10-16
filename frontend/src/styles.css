@@ -78,6 +78,7 @@ td span{display:block;color:#99a19b;font-size:9px;margin-top:3px}
 td small{font-size:9px;color:#929c95}
 .risk-badge{display:inline-flex;padding:4px 7px;border-radius:4px;font-size:9px;font-weight:700;text-transform:capitalize}
 .risk-badge.critical{background:#f9ebea;color:#b3514b}.risk-badge.moderate{background:#fbf3e3;color:#a57826}.risk-badge.stable{background:#eaf4ed;color:#43805a}
+.assessment-badges{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}.assessment-badge{display:inline-flex;width:max-content;padding:3px 5px;border-radius:4px;font-size:8px;font-weight:700;white-space:nowrap}.method-badge{background:#fff3e0;color:#9a6520}.source-badge{background:#edf3f8;color:#4c6c83}.synthetic-badge{background:#f8eaea;color:#a24d49}
 .cover-critical{color:#b4544d!important}
 .panel-footnote{font-size:9px;color:#a0a8a1;padding:9px 19px 13px;border-top:1px solid #f0f2f0}
 .distribution-panel{padding-bottom:0}
