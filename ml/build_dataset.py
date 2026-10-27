@@ -15,7 +15,8 @@ from backend.app.validation import ValidationConfig, validate_inventory_csv
 from .features import DEFAULT_CALENDAR_PATH, FeatureBuilder
 from .labels import LabelMode, build_labels, label_prevalence
 from .leakage import target_leakage_diagnostics
-from .periods import DataFrequency
+from .missingness import profile_inventory_missingness
+from .periods import DataFrequency, parse_boolean
 from .splits import grouped_unseen_split, time_based_split
 
 DATASET_ID_PATTERN = re.compile(r"^v1-\d{8}T\d{6}Z-[0-9a-f]{32}$")
@@ -194,15 +195,21 @@ def build_dataset(
         for row in output[["facility_id", "item_id", "date"]].itertuples(index=False)
     ]
     prevalence = label_prevalence(labels)
+    missingness = profile_inventory_missingness(raw, frequency=data_frequency)
+    diagnostic_rows = output.loc[
+        output["time_split"].isin(("train", "validation"))
+        & output["target"].notna()
+    ]
     diagnostics = target_leakage_diagnostics(
-        features,
-        labels,
+        diagnostic_rows[builder.feature_list],
+        diagnostic_rows[["target"]],
         feature_lineage=builder.feature_lineage,
     )
     availability = builder.availability_report(features)
-    contains_synthetic = any(
-        str(value).strip().casefold() == "true" for value in raw["is_synthetic"]
-    )
+    synthetic_flags = raw["is_synthetic"].map(parse_boolean)
+    if synthetic_flags.isna().any() or synthetic_flags.nunique() != 1:
+        raise ValueError("A feature dataset must have one consistent is_synthetic value for every row.")
+    contains_synthetic = bool(synthetic_flags.iloc[0])
     created = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     version = f"v1-{created}-{uuid.uuid4().hex}"
     destination = (output_root or DEFAULT_OUTPUT_ROOT) / dataset_id / version
@@ -229,12 +236,16 @@ def build_dataset(
             "unseen_group": grouped["boundaries"],
         },
         "label_prevalence": prevalence,
+        "source_missingness": missingness,
         "leakage_diagnostics": diagnostics,
         "feature_lineage": builder.feature_lineage,
         "validation": validation,
         "group_column": group_column,
     }
     output.to_csv(features_path, index=False)
+    feature_table_sha256 = hashlib.sha256(features_path.read_bytes()).hexdigest()
+    metadata["feature_table_sha256"] = feature_table_sha256
+    metadata["feature_table_row_count"] = len(output)
     metadata_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
     report = _render_report(metadata)
     report_path.write_text(report, encoding="utf-8")
@@ -285,6 +296,14 @@ def _render_report(metadata: dict[str, object]) -> str:
                 availability,
                 ("feature", "available_rows", "total_rows", "availability_share", "missing_reason"),
             ),
+            "",
+            "## Source missingness by facility",
+            "",
+            "Missing periods and explicit missing cells are separate. Missing periods are counted only within each facility-item's observed date range; zero stock/consumption is not missing. This report does not impute or create rows.",
+            "",
+            "```json",
+            json.dumps(metadata["source_missingness"], indent=2),
+            "```",
             "",
             "## Time-based split",
             "",

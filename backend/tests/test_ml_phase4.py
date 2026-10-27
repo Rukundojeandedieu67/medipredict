@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 import subprocess
 import sys
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -12,12 +13,19 @@ import pytest
 
 from ml.build_dataset import build_dataset
 from ml.promote import evaluate_promotion_gate
+from ml.missingness import profile_inventory_missingness
 from ml.synthetic import generate_synthetic_supply_history
+from ml.splits import time_based_split
 from ml.train import (
     TestSetAccessGuard,
+    _load_feature_table,
     _resolve_feature_table,
     _subgroups,
     _preprocessors,
+    _validate_time_split_metadata,
+    _threshold_for_precision,
+    _training_validation_leakage_diagnostics,
+    _validation_policy,
 )
 from backend.app.validation import ValidationConfig, validate_inventory_csv
 from backend.app import ml_service
@@ -87,6 +95,226 @@ def test_test_set_access_guard_allows_exactly_one_access():
     assert guard.access_count == 1
 
 
+def test_test_row_changes_do_not_change_validation_calibrator_or_threshold():
+    validation_y = np.asarray([0, 1, 0, 1, 0, 1] * 5)
+    validation_scores = np.asarray([0.1, 0.8, 0.2, 0.7, 0.3, 0.9] * 5)
+    test_rows = pd.DataFrame(
+        {"feature": np.arange(10), "target": [0, 1] * 5}
+    )
+    first = _validation_policy(validation_y, validation_scores, 0.5)
+
+    test_rows["feature"] = np.random.default_rng(42).normal(size=len(test_rows))
+    test_rows["target"] = 1 - test_rows["target"]
+    second = _validation_policy(validation_y, validation_scores, 0.5)
+
+    assert first[2:4] == second[2:4]
+    np.testing.assert_array_equal(first[0], second[0])
+    np.testing.assert_array_equal(
+        first[1].X_thresholds_, second[1].X_thresholds_
+    )
+    np.testing.assert_array_equal(
+        first[1].y_thresholds_, second[1].y_thresholds_
+    )
+
+
+def test_unattainable_precision_target_is_reported_as_not_comparable():
+    y = np.asarray([1, 0, 1, 0])
+    scores = np.asarray([0.1, 0.2, 0.3, 0.4])
+    threshold, selection = _threshold_for_precision(y, scores, 0.99)
+
+    assert 0 <= threshold <= 1
+    assert selection["selection"] == "maximum validation F1; precision target was unattainable"
+    assert selection["precision_target_attained"] is False
+    assert selection["validation_precision"] < 0.99
+
+    gate = evaluate_promotion_gate(
+        is_synthetic=False,
+        time_based_split=True,
+        test_metrics={
+            "rule_baseline": {
+                "pr_auc": 0.3,
+                "recall": 0.5,
+                "recall_at_fixed_precision": 0.5,
+                "fixed_precision_target": 0.99,
+                "precision_target_attained_on_validation": True,
+            },
+            "selected_model": {
+                "pr_auc": 0.6,
+                "recall": 0.8,
+                "recall_at_fixed_precision": None,
+                "fixed_precision_target": None,
+                "precision_target_attained_on_validation": False,
+                "brier": 0.1,
+                "pr_auc_difference_vs_rule_ci": [0.1, 0.4],
+            },
+        },
+        gate_diagnostics={"unseen_recall": 0.8, "leakage_warnings": []},
+    )
+    assert gate["criteria"]["comparable_precision_operating_point"] is False
+    assert gate["criteria"]["recall_beats_rule_at_fixed_precision"] is False
+
+
+def test_training_diagnostics_ignore_test_labels_and_values():
+    frame = pd.DataFrame(
+        {
+            "time_split": ["train", "train", "validation", "validation", "test", "test"],
+            "target": [0, 1, 0, 1, 0, 1],
+            "feature": [0.1, 0.9, 0.2, 0.8, 0.3, 0.7],
+        }
+    )
+    first = _training_validation_leakage_diagnostics(frame, ["feature"], {})
+    changed_test = frame.copy()
+    changed_test.loc[changed_test["time_split"] == "test", "target"] = [1, 0]
+    changed_test.loc[changed_test["time_split"] == "test", "feature"] = [1000, -1000]
+    second = _training_validation_leakage_diagnostics(changed_test, ["feature"], {})
+
+    assert first == second
+
+
+def test_facility_missingness_distinguishes_period_gaps_from_zero_values():
+    observations = pd.DataFrame(
+        [
+            ("FAC-A", "ITEM-1", "2026-01-01", 0, 2),
+            ("FAC-A", "ITEM-1", "2026-01-03", 5, ""),
+            ("FAC-B", "ITEM-2", "2026-01-01", 8, 1),
+            ("FAC-B", "ITEM-2", "2026-01-02", 7, 1),
+        ],
+        columns=[
+            "facility_id", "item_id", "date", "stock_on_hand", "units_consumed"
+        ],
+    )
+    original = observations.copy(deep=True)
+
+    report = profile_inventory_missingness(observations, frequency="daily")
+
+    assert report["facility_count"] == 2
+    assert report["facility_item_pair_count"] == 2
+    assert report["expected_periods_within_observed_ranges"] == 5
+    assert report["missing_report_periods_within_observed_ranges"] == 1
+    assert report["explicit_missing_values_by_column"]["stock_on_hand"] == 0
+    assert report["explicit_missing_values_by_column"]["units_consumed"] == 1
+    assert report["facility_summaries"][0] == {
+        "facility_id": "FAC-A",
+        "facility_item_pairs": 1,
+        "observed_rows": 2,
+        "expected_periods": 3,
+        "missing_periods": 1,
+    }
+    pd.testing.assert_frame_equal(observations, original)
+
+
+def test_tampered_feature_csv_fails_hash_validation(tmp_path):
+    build_id = "v1-20261016T120000Z-" + "c" * 32
+    directory = tmp_path / build_id
+    directory.mkdir()
+    feature_path = directory / "features.csv"
+    pd.DataFrame(
+        {
+            "facility_id": ["F"],
+            "item_id": ["I"],
+            "date": ["2026-01-01"],
+            "target": [0],
+            "time_split": ["train"],
+            "group_split": ["train"],
+            "is_synthetic": [False],
+            "feature": [1.0],
+        }
+    ).to_csv(feature_path, index=False)
+    metadata = {
+        "dataset_id": "upload",
+        "dataset_hash": "source-hash",
+        "build_id": build_id,
+        "frequency": "daily",
+        "horizon": 1,
+        "feature_list": ["feature"],
+        "feature_builder_state": {"feature_list": ["feature"]},
+        "is_synthetic": False,
+        "validation": {"valid": True},
+        "split_boundaries": {},
+        "leakage_diagnostics": {},
+        "feature_table_sha256": hashlib.sha256(feature_path.read_bytes()).hexdigest(),
+        "feature_table_row_count": 1,
+    }
+    (directory / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    feature_path.write_text(feature_path.read_text(encoding="utf-8").replace("1.0", "2.0"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        _load_feature_table(directory)
+
+
+def test_inconsistent_row_provenance_fails_validation(tmp_path):
+    build_id = "v1-20261016T120000Z-" + "d" * 32
+    directory = tmp_path / build_id
+    directory.mkdir()
+    feature_path = directory / "features.csv"
+    pd.DataFrame(
+        {
+            "facility_id": ["F", "F"],
+            "item_id": ["I", "I"],
+            "date": ["2026-01-01", "2026-01-02"],
+            "target": [0, 1],
+            "time_split": ["train", "train"],
+            "group_split": ["train", "train"],
+            "is_synthetic": [False, True],
+            "feature": [1.0, 2.0],
+        }
+    ).to_csv(feature_path, index=False)
+    metadata = {
+        "dataset_id": "upload",
+        "dataset_hash": "source-hash",
+        "build_id": build_id,
+        "frequency": "daily",
+        "horizon": 1,
+        "feature_list": ["feature"],
+        "feature_builder_state": {"feature_list": ["feature"]},
+        "is_synthetic": False,
+        "validation": {"valid": True},
+        "split_boundaries": {},
+        "leakage_diagnostics": {},
+        "feature_table_sha256": hashlib.sha256(feature_path.read_bytes()).hexdigest(),
+        "feature_table_row_count": 2,
+    }
+    (directory / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="is_synthetic"):
+        _load_feature_table(directory)
+
+
+def test_time_split_rejects_metadata_with_insufficient_purge_gap():
+    rows = pd.DataFrame(
+        {
+            "facility_id": ["F"] * 100,
+            "item_id": ["I"] * 100,
+            "date": pd.date_range("2026-01-01", periods=100).strftime("%Y-%m-%d"),
+            "target": np.ones(100, dtype=int),
+        }
+    )
+    result = time_based_split(
+        rows, horizon=4, frequency="daily", minimum_positives=0
+    )
+    assignments = {}
+    for split_name, split_frame in result["splits"].items():
+        for row in split_frame[["facility_id", "item_id", "date"]].itertuples(index=False):
+            assignments[(row.facility_id, row.item_id, pd.Timestamp(row.date))] = split_name
+    keys = [
+        (row.facility_id, row.item_id, pd.Timestamp(row.date))
+        for row in rows[["facility_id", "item_id", "date"]].itertuples(index=False)
+    ]
+    rows["time_split"] = [assignments.get(key) for key in keys]
+    boundaries = result["boundaries"].copy()
+    boundaries["purged_before_test"] = boundaries["purged_before_test"][:-1]
+
+    with pytest.raises(ValueError, match="purged_before_test|purge gap"):
+        _validate_time_split_metadata(
+            rows,
+            {
+                "frequency": "daily",
+                "horizon": 4,
+                "split_boundaries": {"time_based": boundaries},
+            },
+        )
+
+
 def test_artifact_directory_creation_refuses_overwrite(tmp_path):
     existing = tmp_path / "immutable-version"
     existing.mkdir()
@@ -152,24 +380,36 @@ def test_phase1_loader_rejects_synthetic_artifact_even_with_complete_metadata(
     [
         (
             True, True,
-            {"rule_baseline": {"pr_auc": 0.2, "recall": 0.1},
+            {"rule_baseline": {"pr_auc": 0.2, "recall": 0.1,
+                               "recall_at_fixed_precision": 0.1, "fixed_precision_target": 0.5,
+                               "precision_target_attained_on_validation": True},
              "selected_model": {"pr_auc": 0.8, "roc_auc": 0.8, "recall": 0.7,
+                                "recall_at_fixed_precision": 0.7, "fixed_precision_target": 0.5,
+                                "precision_target_attained_on_validation": True,
                                 "brier": 0.1, "pr_auc_difference_vs_rule_ci": [0.1, 0.3]}},
             {"unseen_recall": 0.7, "leakage_warnings": []},
             "real_data",
         ),
         (
             False, True,
-            {"rule_baseline": {"pr_auc": 0.2, "recall": 0.1},
+            {"rule_baseline": {"pr_auc": 0.2, "recall": 0.1,
+                               "recall_at_fixed_precision": 0.1, "fixed_precision_target": 0.5,
+                               "precision_target_attained_on_validation": True},
              "selected_model": {"pr_auc": 0.8, "roc_auc": 0.8, "recall": 0.7,
+                                "recall_at_fixed_precision": 0.7, "fixed_precision_target": 0.5,
+                                "precision_target_attained_on_validation": True,
                                 "brier": 0.1, "pr_auc_difference_vs_rule_ci": [-0.1, 0.3]}},
             {"unseen_recall": 0.7, "leakage_warnings": []},
             "test_pr_auc_beats_rule_with_ci",
         ),
         (
             False, False,
-            {"rule_baseline": {"pr_auc": 0.2, "recall": 0.8},
+            {"rule_baseline": {"pr_auc": 0.2, "recall": 0.8,
+                               "recall_at_fixed_precision": 0.8, "fixed_precision_target": 0.5,
+                               "precision_target_attained_on_validation": True},
              "selected_model": {"pr_auc": 0.8, "roc_auc": 0.8, "recall": 0.4,
+                                "recall_at_fixed_precision": 0.4, "fixed_precision_target": 0.5,
+                                "precision_target_attained_on_validation": True,
                                 "brier": 0.4, "pr_auc_difference_vs_rule_ci": [0.1, 0.3]}},
             {"unseen_recall": 0.1, "leakage_warnings": ["future-stock"]},
             "time_based_split",
@@ -198,6 +438,7 @@ def test_promotion_gate_reports_each_failed_condition(
         "time_based_split",
         "test_pr_auc_beats_rule_with_ci",
         "recall_beats_rule_at_fixed_precision",
+        "comparable_precision_operating_point",
         "calibration_within_limit",
         "unseen_facility_within_tolerance",
         "no_phase3_leakage_warnings",
@@ -205,9 +446,15 @@ def test_promotion_gate_reports_each_failed_condition(
 )
 def test_promotion_gate_rejects_each_failed_criterion(criterion):
     test_metrics = {
-        "rule_baseline": {"pr_auc": 0.3, "recall": 0.4},
+        "rule_baseline": {
+            "pr_auc": 0.3, "recall": 0.4,
+            "recall_at_fixed_precision": 0.4, "fixed_precision_target": 0.5,
+            "precision_target_attained_on_validation": True,
+        },
         "selected_model": {
             "pr_auc": 0.6, "roc_auc": 0.7, "recall": 0.8, "brier": 0.1,
+            "recall_at_fixed_precision": 0.8, "fixed_precision_target": 0.5,
+            "precision_target_attained_on_validation": True,
             "pr_auc_difference_vs_rule_ci": [0.1, 0.4],
         },
     }
@@ -221,7 +468,9 @@ def test_promotion_gate_rejects_each_failed_criterion(criterion):
     elif criterion == "test_pr_auc_beats_rule_with_ci":
         test_metrics["selected_model"]["pr_auc_difference_vs_rule_ci"] = [-0.1, 0.2]
     elif criterion == "recall_beats_rule_at_fixed_precision":
-        test_metrics["selected_model"]["recall"] = 0.2
+        test_metrics["selected_model"]["recall_at_fixed_precision"] = 0.2
+    elif criterion == "comparable_precision_operating_point":
+        test_metrics["selected_model"]["precision_target_attained_on_validation"] = False
     elif criterion == "calibration_within_limit":
         test_metrics["selected_model"]["brier"] = 0.9
     elif criterion == "unseen_facility_within_tolerance":
@@ -301,6 +550,19 @@ def test_synthetic_end_to_end_training_is_unvalidated_and_versioned(tmp_path):
     assert metadata["notice"].startswith("SYNTHETIC - not evidence of real-world performance")
     assert metadata["is_synthetic"] is True
     assert metadata["model_validated"] is False
+    assert metadata["feature_table_row_count"] == metadata["row_count"]
+    assert len(metadata["feature_table_sha256"]) == 64
+    assert metadata["source_missingness"]["missing_report_periods_within_observed_ranges"] == 0
+    assert metadata["source_missingness"]["facility_count"] == 6
+    assert metadata["evaluation_integrity"] == {
+        "feature_table_hash_verified": True,
+        "feature_table_row_count_verified": True,
+        "build_id_verified": True,
+        "row_provenance_verified": True,
+        "time_based_split_verified": True,
+        "grouped_split_verified": True,
+        "test_label_diagnostics_used_before_final_pass": False,
+    }
     assert metadata["test_access_count"] == 1
     assert metadata["test_metrics"]["pr_auc"] is not None
     assert metadata["test_metrics"]["roc_auc"] is not None
@@ -310,6 +572,11 @@ def test_synthetic_end_to_end_training_is_unvalidated_and_versioned(tmp_path):
     assert metadata["all_test_metrics"]["persistence_baseline"]["cluster_bootstrap_95_ci"]["pr_auc"]
     assert metadata["feature_builder_state"]["feature_list"] == metadata["feature_list"]
     assert metadata["test_metrics"]["recall_at_fixed_precision"] == metadata["test_metrics"]["recall"]
+    assert (
+        metadata["test_metrics"]["fixed_precision_target"]
+        == metadata["all_test_metrics"]["rule_baseline"]["fixed_precision_target"]
+        == 0.5
+    )
     assert metadata["unseen_group"]["results"]["status"] == "computed"
     assert {
         "time_based_split", "test_metrics", "training_date_range", "data_hash",
@@ -322,4 +589,3 @@ def test_synthetic_end_to_end_training_is_unvalidated_and_versioned(tmp_path):
     assert (artifact / "evaluation_report.md").read_text(encoding="utf-8").startswith(
         "# SYNTHETIC - not evidence of real-world performance"
     )
-

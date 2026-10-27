@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 import logging
@@ -35,7 +36,9 @@ from sklearn.inspection import permutation_importance
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from .leakage import target_leakage_diagnostics
 from .promote import evaluate_promotion_gate
+from .splits import grouped_unseen_split, time_based_split
 
 LOGGER = logging.getLogger("ml.train")
 FEATURE_ROOT = Path(__file__).resolve().parent / "artifacts" / "feature_tables"
@@ -89,13 +92,15 @@ def _load_feature_table(directory: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     required = (
         "dataset_id", "dataset_hash", "build_id", "frequency", "horizon",
         "feature_list", "feature_builder_state", "is_synthetic", "validation", "split_boundaries",
-        "leakage_diagnostics",
+        "leakage_diagnostics", "feature_table_sha256", "feature_table_row_count",
     )
     missing = [field for field in required if field not in metadata]
     if missing:
         raise ValueError(f"Feature dataset metadata is missing: {', '.join(missing)}")
     if metadata.get("validation", {}).get("valid") is not True:
         raise ValueError("Feature dataset failed validation.")
+    if metadata["build_id"] != directory.name:
+        raise ValueError("Feature build ID does not match the feature-table directory.")
     if metadata["frequency"] not in ("daily", "monthly") or int(metadata["horizon"]) < 1:
         raise ValueError("Feature dataset has invalid frequency or horizon metadata.")
     if metadata["feature_builder_state"].get("feature_list") != metadata["feature_list"]:
@@ -109,7 +114,192 @@ def _load_feature_table(directory: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
     absent = sorted(required_columns.difference(frame.columns))
     if absent:
         raise ValueError(f"Feature table is missing required columns: {', '.join(absent)}")
+    actual_hash = hashlib.sha256(features_path.read_bytes()).hexdigest()
+    if actual_hash != metadata["feature_table_sha256"]:
+        raise ValueError("Feature table SHA-256 does not match its build metadata.")
+    if len(frame) != metadata["feature_table_row_count"]:
+        raise ValueError("Feature table row count does not match its build metadata.")
+    synthetic_flags = frame["is_synthetic"].map(_parse_synthetic_flag)
+    if synthetic_flags.isna().any() or not synthetic_flags.eq(metadata["is_synthetic"]).all():
+        raise ValueError("Feature-table is_synthetic values do not match dataset metadata.")
     return frame, metadata
+
+
+def _parse_synthetic_flag(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().casefold()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    return None
+
+
+def _observation_keys(frame: pd.DataFrame) -> list[tuple[str, str, pd.Timestamp]]:
+    return [
+        (str(row.facility_id), str(row.item_id), pd.Timestamp(row.date))
+        for row in frame[["facility_id", "item_id", "date"]].itertuples(index=False)
+    ]
+
+
+def _assignment_map(split_result: dict[str, Any]) -> dict[tuple[str, str, pd.Timestamp], str]:
+    assignments: dict[tuple[str, str, pd.Timestamp], str] = {}
+    for split_name, split_frame in split_result["splits"].items():
+        for key in _observation_keys(split_frame):
+            assignments[key] = split_name
+    return assignments
+
+
+def _summary_structure(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: summary.get(key)
+        for key in ("row_count", "labeled_row_count", "start", "end")
+    }
+
+
+def _label_presence_only(targets: pd.Series) -> pd.Series:
+    presence = pd.Series(pd.NA, index=targets.index, dtype="Int64")
+    presence.loc[targets.notna()] = 0
+    return presence
+
+
+def _validate_time_split_metadata(
+    frame: pd.DataFrame,
+    metadata: dict[str, Any],
+) -> bool:
+    frequency = metadata["frequency"]
+    horizon = int(metadata["horizon"])
+    split_input = frame[["facility_id", "item_id", "date"]].copy()
+    split_input["target"] = _label_presence_only(frame["target"])
+    recomputed = time_based_split(
+        split_input,
+        horizon=horizon,
+        frequency=frequency,
+        minimum_positives=0,
+    )
+    expected = _assignment_map(recomputed)
+    actual_values = frame["time_split"]
+    actual = [
+        None if pd.isna(value) or str(value).strip() == "" else str(value)
+        for value in actual_values
+    ]
+    expected_values = [expected.get(key) for key in _observation_keys(frame)]
+    if actual != expected_values:
+        raise ValueError("Stored time-split assignments do not match the recomputed split.")
+
+    expected_boundaries = recomputed["boundaries"]
+    stored_boundaries = metadata["split_boundaries"].get("time_based")
+    if not isinstance(stored_boundaries, dict):
+        raise ValueError("Feature metadata is missing time-based split boundaries.")
+    structural_keys = (
+        "train_period_start", "train_period_end",
+        "validation_period_start", "validation_period_end",
+        "test_period_start", "test_period_end", "purge_gap_periods",
+        "purged_before_validation", "purged_before_test", "frequency", "horizon",
+    )
+    for key in structural_keys:
+        if stored_boundaries.get(key) != expected_boundaries.get(key):
+            raise ValueError(f"Stored time-split boundary '{key}' failed integrity validation.")
+    for split_name in ("train", "validation", "test"):
+        if _summary_structure(stored_boundaries.get(split_name, {})) != _summary_structure(
+            expected_boundaries[split_name]
+        ):
+            raise ValueError(
+                f"Stored {split_name} split row/date summary failed integrity validation."
+            )
+    if len(stored_boundaries.get("purged_before_validation", [])) < horizon:
+        raise ValueError("Train/validation purge gap is shorter than the label horizon.")
+    if len(stored_boundaries.get("purged_before_test", [])) < horizon:
+        raise ValueError("Validation/test purge gap is shorter than the label horizon.")
+    return True
+
+
+def _validate_group_split_metadata(
+    frame: pd.DataFrame,
+    metadata: dict[str, Any],
+) -> None:
+    group_column = metadata.get("group_column")
+    if group_column not in ("facility_id", "district"):
+        raise ValueError("Feature metadata has an invalid unseen-group split column.")
+    split_columns = list(dict.fromkeys(["facility_id", "item_id", "date", group_column]))
+    split_input = frame[split_columns].copy()
+    split_input["target"] = _label_presence_only(frame["target"])
+    recomputed = grouped_unseen_split(
+        split_input,
+        group_column=group_column,
+        minimum_positives=0,
+    )
+    expected = _assignment_map(recomputed)
+    actual_values = frame["group_split"]
+    actual = [
+        None if pd.isna(value) or str(value).strip() == "" else str(value)
+        for value in actual_values
+    ]
+    if actual != [expected.get(key) for key in _observation_keys(frame)]:
+        raise ValueError("Stored unseen-group assignments do not match the recomputed split.")
+
+    stored = metadata["split_boundaries"].get("unseen_group")
+    expected_boundaries = recomputed["boundaries"]
+    if not isinstance(stored, dict):
+        raise ValueError("Feature metadata is missing unseen-group split boundaries.")
+    for key in ("group_column", "train_groups", "test_groups"):
+        if stored.get(key) != expected_boundaries.get(key):
+            raise ValueError(f"Stored unseen-group boundary '{key}' failed integrity validation.")
+    for split_name in ("train", "test"):
+        if _summary_structure(stored.get(split_name, {})) != _summary_structure(
+            expected_boundaries[split_name]
+        ):
+            raise ValueError(
+                f"Stored unseen-group {split_name} row/date summary failed integrity validation."
+            )
+
+
+def _validation_policy(
+    y_validation: np.ndarray,
+    validation_scores: np.ndarray,
+    precision_target: float,
+) -> tuple[np.ndarray, Any | None, float, dict[str, Any], dict[str, Any]]:
+    calibrator = None
+    if len(np.unique(y_validation)) > 1 and len(y_validation) >= 20:
+        calibrator = IsotonicRegression(out_of_bounds="clip").fit(
+            validation_scores, y_validation
+        )
+        calibrated_scores = calibrator.predict(validation_scores)
+        calibration = {
+            "method": "isotonic",
+            "fit_data": "validation predictions and labels only",
+            "brier_before": float(brier_score_loss(y_validation, validation_scores)),
+            "brier_after": float(brier_score_loss(y_validation, calibrated_scores)),
+            "calibrator": calibrator,
+        }
+    else:
+        calibrated_scores = validation_scores.copy()
+        calibration = {
+            "method": None,
+            "reason": "validation requires at least 20 rows and both classes",
+            "brier_before": float(brier_score_loss(y_validation, validation_scores)),
+            "brier_after": None,
+            "calibrator": None,
+        }
+    threshold, selection = _threshold_for_precision(
+        y_validation, calibrated_scores, precision_target
+    )
+    return calibrated_scores, calibrator, threshold, selection, calibration
+
+
+def _rule_scores(frame: pd.DataFrame, frequency: str) -> np.ndarray:
+    cover_column = "days_of_cover" if frequency == "daily" else "months_of_stock"
+    if cover_column not in frame:
+        raise ValueError(f"Rule baseline requires feature '{cover_column}'.")
+    cover = pd.to_numeric(frame[cover_column], errors="coerce").to_numpy(dtype=float)
+    critical_limit, moderate_limit = (7.0, 14.0) if frequency == "daily" else (1.0, 2.0)
+    scores = np.full(len(cover), -0.5, dtype=float)
+    finite = np.isfinite(cover)
+    scores[finite & (cover < critical_limit)] = 1.0
+    scores[finite & (cover >= critical_limit) & (cover <= moderate_limit)] = 0.5
+    scores[finite & (cover > moderate_limit)] = 0.0
+    return scores
 
 
 class TestSetAccessGuard:
@@ -135,6 +325,20 @@ def _feature_columns(frame: pd.DataFrame, metadata: dict[str, Any]) -> list[str]
     if not columns:
         raise ValueError("No declared Phase 3 features are present in the feature table.")
     return columns
+
+
+def _training_validation_leakage_diagnostics(
+    frame: pd.DataFrame,
+    feature_columns: list[str],
+    feature_lineage: dict[str, dict[str, object]],
+) -> dict[str, Any]:
+    eligible = frame["time_split"].isin(("train", "validation")) & frame["target"].notna()
+    scoped = frame.loc[eligible]
+    return target_leakage_diagnostics(
+        scoped[feature_columns],
+        scoped[["target"]],
+        feature_lineage=feature_lineage,
+    )
 
 
 def _split_xy(
@@ -299,8 +503,12 @@ def _threshold_for_precision(
         return selected[1], {
             "selection": "maximum validation recall meeting precision target",
             "precision_target": precision_target,
+            "precision_target_attained": True,
             "validation_precision": selected[2],
             "validation_recall": selected[0],
+            "validation_f1": float(
+                f1_score(y, scores >= selected[1], zero_division=0)
+            ),
         }
     if len(thresholds):
         f1_values = [
@@ -311,12 +519,18 @@ def _threshold_for_precision(
         return float(thresholds[index]), {
             "selection": "maximum validation F1; precision target was unattainable",
             "precision_target": precision_target,
+            "precision_target_attained": False,
             "validation_precision": float(precision[index]),
             "validation_recall": float(recall[index]),
+            "validation_f1": float(f1_values[index]),
         }
     return 0.5, {
         "selection": "fixed default; validation scores had no thresholds",
         "precision_target": precision_target,
+        "precision_target_attained": False,
+        "validation_precision": None,
+        "validation_recall": None,
+        "validation_f1": None,
     }
 
 
@@ -461,6 +675,7 @@ def _markdown_report(report: dict[str, Any]) -> str:
     lines.extend(["", "## Calibration", "", "```json", json.dumps(report["calibration"], indent=2), "```", ""])
     lines.extend(["## Label prevalence", "", "```json", json.dumps(report["label_prevalence"], indent=2), "```", ""])
     lines.extend(["## Feature availability", "", "```json", json.dumps(report["feature_availability"], indent=2), "```", ""])
+    lines.extend(["## Source missingness profile", "", "```json", json.dumps(report["source_missingness"], indent=2), "```", ""])
     lines.extend(["## Lead time", "", "```json", json.dumps(report["lead_time"], indent=2), "```", ""])
     lines.extend([
         "## Subgroups", "",
@@ -502,16 +717,22 @@ def train_feature_dataset(
         raise ValueError("Positive minimum counts are required.")
     directory = _resolve_feature_table(feature_dataset_id, feature_root)
     frame, metadata = _load_feature_table(directory)
+    time_split_valid = _validate_time_split_metadata(frame, metadata)
+    _validate_group_split_metadata(frame, metadata)
     is_synthetic = bool(metadata["is_synthetic"])
     _log(f"Starting training for feature build {metadata['build_id']}", is_synthetic=is_synthetic)
 
-    diagnostic = metadata["leakage_diagnostics"]
+    features = _feature_columns(frame, metadata)
+    diagnostic = _training_validation_leakage_diagnostics(
+        frame,
+        features,
+        metadata.get("feature_lineage", {}),
+    )
     leakage_warnings = (
         diagnostic.get("future_stock_feature_warnings", [])
         + diagnostic.get("probable_leak_or_trivial_rule", [])
         + diagnostic.get("high_correlations", [])
     )
-    features = _feature_columns(frame, metadata)
     split_frames: dict[str, pd.DataFrame] = {}
     for split_name in ("train", "validation"):
         part = frame.loc[(frame["time_split"] == split_name) & frame["target"].notna()].copy()
@@ -526,12 +747,6 @@ def train_feature_dataset(
                 f"{minimum_split_positives} are required."
             )
         split_frames[split_name] = part
-    split_summary = metadata["split_boundaries"].get("time_based", {})
-    test_summary = split_summary.get("test", {})
-    if int(test_summary.get("positive_count", -1)) < minimum_split_positives:
-        raise ValueError(
-            "test split metadata does not report the configured minimum positive labels."
-        )
     train = split_frames["train"]
     validation = split_frames["validation"]
     x_train, y_train = _split_xy(train, features)
@@ -549,32 +764,26 @@ def train_feature_dataset(
     validation_calibration: dict[str, dict[str, Any]] = {}
     calibrated_validation_scores: dict[str, np.ndarray] = {}
     for name, scores in validation_scores.items():
-        calibrator = IsotonicRegression(out_of_bounds="clip")
-        if len(np.unique(y_validation)) > 1 and len(y_validation) >= 20:
-            calibrator.fit(scores, y_validation)
-            calibrated_validation = calibrator.predict(scores)
-            validation_calibration[name] = {
-                "method": "isotonic",
-                "fit_data": "validation predictions and labels only",
-                "brier_before": float(brier_score_loss(y_validation, scores)),
-                "brier_after": float(brier_score_loss(y_validation, calibrated_validation)),
-                "calibrator": calibrator,
-            }
-        else:
-            calibrated_validation = scores
-            validation_calibration[name] = {
-                "method": None,
-                "reason": "validation requires at least 20 rows and both classes",
-                "brier_before": float(brier_score_loss(y_validation, scores)),
-                "brier_after": None,
-                "calibrator": None,
-            }
+        (
+            calibrated_validation,
+            calibrator,
+            threshold,
+            selection,
+            calibration,
+        ) = _validation_policy(y_validation, scores, precision_target)
+        validation_calibration[name] = {
+            **calibration,
+            "calibrator": calibrator,
+        }
         calibrated_validation_scores[name] = calibrated_validation
-        thresholds[name], threshold_selection[name] = _threshold_for_precision(
-            y_validation, calibrated_validation, precision_target
-        )
+        thresholds[name] = threshold
+        threshold_selection[name] = selection
 
     chosen_model_name = max(validation_pr, key=validation_pr.get)
+    rule_validation_scores = _rule_scores(validation, metadata["frequency"])
+    rule_threshold, rule_threshold_selection = _threshold_for_precision(
+        y_validation, rule_validation_scores, precision_target
+    )
     validation_builder_end = metadata.get("split_boundaries", {}).get("time_based", {}).get("train_period_end")
     if not validation_builder_end:
         raise ValueError("Feature dataset metadata is missing train split boundaries.")
@@ -586,11 +795,17 @@ def train_feature_dataset(
         ].copy()
     )
     test = test_guard.evaluate_once()
+    y_test = pd.to_numeric(test["target"], errors="raise").astype(int).to_numpy()
+    if int(y_test.sum()) < minimum_split_positives:
+        raise ValueError(
+            f"test split has {int(y_test.sum())} positives; at least "
+            f"{minimum_split_positives} are required."
+        )
     if is_synthetic and not test["is_synthetic"].map(
         lambda value: str(value).strip().casefold() == "true"
     ).all():
         raise ValueError("Synthetic test rows are missing is_synthetic=true.")
-    x_test, y_test = _split_xy(test, features)
+    x_test, _ = _split_xy(test, features)
 
     prediction_scores: dict[str, np.ndarray] = {}
     calibration_report: dict[str, Any] = {}
@@ -614,22 +829,27 @@ def train_feature_dataset(
             "validation_calibration_curve": _calibration_curve(y_validation, val_calibrated),
         }
 
-    cover_column = "days_of_cover" if metadata["frequency"] == "daily" else "months_of_stock"
-    if cover_column in test:
-        cover = pd.to_numeric(test[cover_column], errors="coerce").to_numpy(dtype=float)
-        daily_thresholds = (7, 14)
-        thresholds_native = daily_thresholds if metadata["frequency"] == "daily" else (1, 2)
-        rule_predictions = np.where(cover < thresholds_native[0], 2, np.where(cover <= thresholds_native[1], 1, 0))
-        rule_scores = rule_predictions.astype(float) / 2.0
-        rule_operating_threshold = 0.5
-    else:
-        rule_scores = np.zeros(len(test), dtype=float)
-        rule_operating_threshold = 1.0
+    rule_scores = _rule_scores(test, metadata["frequency"])
+    rule_operating_threshold = rule_threshold
     persistence = (
         pd.to_numeric(test["historical_stockout_count"], errors="coerce").fillna(0).gt(0).to_numpy(dtype=float)
         if "historical_stockout_count" in test else np.zeros(len(test), dtype=float)
     )
     rule_metrics = _metric_summary(y_test, rule_scores, rule_operating_threshold)
+    rule_metrics["confidence_threshold_selection"] = rule_threshold_selection
+    rule_metrics["precision_target_attained_on_validation"] = bool(
+        rule_threshold_selection["precision_target_attained"]
+    )
+    rule_metrics["recall_at_fixed_precision"] = (
+        rule_metrics["recall"]
+        if rule_threshold_selection["precision_target_attained"]
+        else None
+    )
+    rule_metrics["fixed_precision_target"] = (
+        precision_target
+        if rule_threshold_selection["precision_target_attained"]
+        else None
+    )
     rule_metrics["cluster_bootstrap_95_ci"] = _bootstrap_ci(
         test, y=y_test, scores=rule_scores, threshold=rule_operating_threshold,
         repetitions=bootstrap_repetitions, seed=seed,
@@ -661,6 +881,9 @@ def train_feature_dataset(
         threshold = thresholds[name]
         metrics = _metric_summary(y_test, scores, threshold)
         metrics["confidence_threshold_selection"] = threshold_selection[name]
+        metrics["precision_target_attained_on_validation"] = bool(
+            threshold_selection[name]["precision_target_attained"]
+        )
         metrics["validation_pr_auc"] = validation_pr[name]
         metrics["selected_parameters"] = parameters[name]
         metrics["cluster_bootstrap_95_ci"] = _bootstrap_ci(
@@ -671,8 +894,16 @@ def train_feature_dataset(
             test, y=y_test, scores=scores, baseline_scores=rule_scores,
             repetitions=bootstrap_repetitions, seed=seed + 1,
         )
-        metrics["recall_at_fixed_precision"] = metrics["recall"]
-        metrics["fixed_precision_target"] = precision_target
+        metrics["recall_at_fixed_precision"] = (
+            metrics["recall"]
+            if threshold_selection[name]["precision_target_attained"]
+            else None
+        )
+        metrics["fixed_precision_target"] = (
+            precision_target
+            if threshold_selection[name]["precision_target_attained"]
+            else None
+        )
         metrics["stockouts_caught_share"] = metrics["recall"]
         test_metric_results[name] = metrics
 
@@ -749,7 +980,7 @@ def train_feature_dataset(
 
     gate = evaluate_promotion_gate(
         is_synthetic=is_synthetic,
-        time_based_split=True,
+        time_based_split=time_split_valid,
         test_metrics={
             "rule_baseline": test_metric_results["rule_baseline"],
             "selected_model": selected_metrics,
@@ -774,7 +1005,7 @@ def train_feature_dataset(
     metadata_out = {
         "notice": "SYNTHETIC - not evidence of real-world performance" if is_synthetic else "Model evaluation artifact",
         "model_version": model_version,
-        "time_based_split": True,
+        "time_based_split": time_split_valid,
         "test_metrics": selected_metrics,
         "all_test_metrics": test_metric_results,
         "training_date_range": {
@@ -782,6 +1013,9 @@ def train_feature_dataset(
             "end": training_dates.max().date().isoformat(),
         },
         "data_hash": metadata["dataset_hash"],
+        "feature_table_sha256": metadata["feature_table_sha256"],
+        "feature_table_row_count": metadata["feature_table_row_count"],
+        "row_count": metadata["row_count"],
         "feature_dataset_id": metadata["build_id"],
         "feature_list": features,
         "horizon_days": int(metadata["horizon"]),
@@ -801,6 +1035,16 @@ def train_feature_dataset(
         "git_commit": _git_commit(),
         "calibration": calibration_report[chosen_model_name],
         "feature_builder_state": metadata["feature_builder_state"],
+        "source_missingness": metadata.get("source_missingness"),
+        "evaluation_integrity": {
+            "feature_table_hash_verified": True,
+            "feature_table_row_count_verified": True,
+            "build_id_verified": True,
+            "row_provenance_verified": True,
+            "time_based_split_verified": time_split_valid,
+            "grouped_split_verified": True,
+            "test_label_diagnostics_used_before_final_pass": False,
+        },
         "validation_only_tuning": parameters,
         "test_access_count": test_guard.access_count,
         "unseen_group": {
@@ -839,6 +1083,7 @@ def train_feature_dataset(
         "calibration": calibration_report,
         "label_prevalence": metadata.get("label_prevalence"),
         "feature_availability": metadata.get("feature_availability", {}),
+        "source_missingness": metadata.get("source_missingness"),
         "lead_time": lead_time,
         "subgroups": _subgroups(
             test, scores=prediction_scores[chosen_model_name],

@@ -43,6 +43,7 @@ For the current assessment only, a zero `units_consumed` value produces `lead_ti
 - Negative stock, consumption, or receipts are blocking errors.
 - A record is warned when `units_consumed` is greater than two times `stock_on_hand + units_received`. This ratio is a configurable anomaly-screening heuristic, not a domain-validated threshold.
 - Missing daily or monthly periods between observations are reported as gap warnings.
+- Feature-dataset reports separately count absent periods between each facility-item's first and last observed date and explicit blank/NA values. Zero stock/consumption is observed data, not missingness. The profile does not insert rows or impute values; synthetic input is clearly marked and cannot be used to infer real facility reporting completeness.
 - `stock_out_days` must be a whole number from 0 to 1 for daily data or 0 through the actual calendar-day count of the month for monthly data.
 - Training intake requires configurable minimum history: **90 records per facility-item and 12 distinct facility-item pairs** by default. These counts are periods at the configured frequency and are validation thresholds, not evidence that a model can be trained or is valid. Assessment reports short history as warnings.
 - Row-level error and warning lists are capped independently at 100 returned issues. Total counts and truncation flags are included in each validation report.

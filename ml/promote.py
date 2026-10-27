@@ -27,8 +27,16 @@ def evaluate_promotion_gate(
     pr = model.get("pr_auc")
     baseline_pr = baseline.get("pr_auc")
     difference_ci = model.get("pr_auc_difference_vs_rule_ci")
-    recall = model.get("recall")
-    baseline_recall = baseline.get("recall")
+    recall = model.get("recall_at_fixed_precision")
+    baseline_recall = baseline.get("recall_at_fixed_precision")
+    precision_target = model.get("fixed_precision_target")
+    baseline_precision_target = baseline.get("fixed_precision_target")
+    comparable_precision_operating_point = bool(
+        model.get("precision_target_attained_on_validation") is True
+        and baseline.get("precision_target_attained_on_validation") is True
+        and isinstance(precision_target, (int, float))
+        and precision_target == baseline_precision_target
+    )
     brier = model.get("brier")
     unseen_recall = gate_diagnostics.get("unseen_recall")
     time_recall = model.get("recall")
@@ -44,10 +52,13 @@ def evaluate_promotion_gate(
             and difference_ci[0] > 0
         ),
         "recall_beats_rule_at_fixed_precision": bool(
+            comparable_precision_operating_point
+            and
             isinstance(recall, (int, float))
             and isinstance(baseline_recall, (int, float))
             and recall > baseline_recall
         ),
+        "comparable_precision_operating_point": comparable_precision_operating_point,
         "calibration_within_limit": bool(
             isinstance(brier, (int, float))
             and brier <= configured["maximum_brier_score"]
