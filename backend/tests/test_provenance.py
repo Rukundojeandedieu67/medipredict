@@ -1,8 +1,10 @@
 import hashlib
+import io
 import json
 from pathlib import Path
 
 import pytest
+from botocore.exceptions import ClientError
 
 from backend.app.provenance import (
     ProvenanceError,
@@ -10,10 +12,11 @@ from backend.app.provenance import (
     revoke_verification,
     verify_dataset,
 )
-from backend.app import main
+from backend.app import main, storage
 from backend.app import models
 from backend.app.database import Base, get_db
 from backend.app.validation import ValidationConfig
+from backend.app.storage import read_object
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -192,7 +195,11 @@ def test_same_known_verifier_and_uploader_is_rejected(dataset):
         _verify(dataset, verified_by="TEST-UPLOADER-001")
 
 
-def test_admin_only_api_verify_revoke_detail_and_list(tmp_path, monkeypatch):
+@pytest.mark.parametrize("storage_backend", ["local", "s3"])
+def test_admin_only_api_verify_revoke_detail_and_list(
+    tmp_path, monkeypatch, storage_backend
+):
+    monkeypatch.setattr(main.settings, "storage_backend", storage_backend)
     uploads = tmp_path / "uploads"
     monkeypatch.setattr(main.settings, "uploads_path", uploads)
     monkeypatch.setattr(main.settings, "admin_api_key", "test-admin-key")
@@ -230,6 +237,39 @@ def test_admin_only_api_verify_revoke_detail_and_list(tmp_path, monkeypatch):
     (tmp_path / "config" / "approved_sources.json").write_text(
         sources.read_text(encoding="utf-8"), encoding="utf-8"
     )
+    objects = {}
+    if storage_backend == "s3":
+        monkeypatch.setattr(main.settings, "object_store_bucket", "dataset-bucket")
+        monkeypatch.setattr(
+            main.settings,
+            "object_store_endpoint_url",
+            "https://account-id.r2.cloudflarestorage.com",
+        )
+        monkeypatch.setattr(main.settings, "object_store_region", "auto")
+        monkeypatch.setattr(main.settings, "object_store_access_key_id", "test-access-key")
+        monkeypatch.setattr(
+            main.settings, "object_store_secret_access_key", "test-secret-key"
+        )
+
+        class Client:
+            def head_object(self, *, Bucket, Key):
+                if (Bucket, Key) not in objects:
+                    raise ClientError(
+                        {"Error": {"Code": "404", "Message": "Missing object"}},
+                        "HeadObject",
+                    )
+
+            def put_object(self, *, Bucket, Key, Body, ContentLength):
+                assert ContentLength == len(Body)
+                objects[(Bucket, Key)] = Body
+
+            def get_object(self, *, Bucket, Key):
+                return {"Body": io.BytesIO(objects[(Bucket, Key)])}
+
+            def delete_object(self, *, Bucket, Key):
+                objects.pop((Bucket, Key), None)
+
+        monkeypatch.setattr(storage.boto3, "client", lambda *args, **kwargs: Client())
     content = (
         "facility_id,item_id,date,stock_on_hand,units_consumed,units_received,is_synthetic\n"
         "TEST-FAC-001,TEST-ITEM-001,0001-01-01,10,1,0,false\n"
@@ -302,6 +342,13 @@ def test_admin_only_api_verify_revoke_detail_and_list(tmp_path, monkeypatch):
                     "reporting_period_end": "0001-01-02",
                 },
                 headers=headers,
+                files={
+                    "evidence_file": (
+                        "evidence.txt",
+                        b"TEST-EVIDENCE",
+                        "text/plain",
+                    )
+                },
             )
             assert verified.status_code == 200
             assert verified.json()["provenance_status"] == "verified"
@@ -341,6 +388,15 @@ def test_admin_only_api_verify_revoke_detail_and_list(tmp_path, monkeypatch):
                 "verification",
                 "revocation",
             ]
+            evidence_details = events[1].details
+            assert evidence_details["evidence_file_sha256"] == hashlib.sha256(
+                b"TEST-EVIDENCE"
+            ).hexdigest()
+            assert read_object(
+                evidence_details["evidence_object_key"],
+                max_bytes=1024,
+                backend=evidence_details["evidence_storage_backend"],
+            ) == b"TEST-EVIDENCE"
     finally:
         main.app.dependency_overrides.pop(get_db, None)
         test_engine.dispose()

@@ -220,7 +220,7 @@ export interface CsvAssessmentItem {
   model_version: null;
   model_validated: false;
   data_source: "uploaded";
-  is_synthetic: boolean;
+  is_synthetic: boolean | null;
   provenance_status: "synthetic" | "uploaded_unverified";
   facility_type: string | null;
   region: string | null;

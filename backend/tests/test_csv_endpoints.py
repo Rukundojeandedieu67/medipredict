@@ -7,20 +7,23 @@ import logging
 import pytest
 from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from backend.app import main
+from backend.app.database import Base
 from backend.app.validation import ValidationConfig, validate_inventory_csv
 
 
-def _csv(rows=1, *, synthetic="false", invalid=False) -> bytes:
-    lines = [
-        "facility_id,item_id,date,stock_on_hand,units_consumed,units_received,is_synthetic",
-    ]
+def _csv(rows=1, *, synthetic="false", invalid=False, include_synthetic=True) -> bytes:
+    columns = "facility_id,item_id,date,stock_on_hand,units_consumed,units_received"
+    if include_synthetic:
+        columns += ",is_synthetic"
+    lines = [columns]
     for index in range(rows):
         flag = "unknown" if invalid else synthetic
-        lines.append(
-            f"FAC-1,ITEM-{index},2026-01-{index + 1:02d},20,2,0,{flag}"
-        )
+        row = f"FAC-1,ITEM-{index},2026-01-{index + 1:02d},20,2,0"
+        lines.append(f"{row},{flag}" if include_synthetic else row)
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
@@ -32,6 +35,21 @@ def _upload(content: bytes) -> UploadFile:
 def permissive_training_thresholds(monkeypatch):
     monkeypatch.setattr(main.settings, "training_min_records", 1)
     monkeypatch.setattr(main.settings, "training_min_facility_items", 1)
+
+
+@pytest.fixture
+def database_session(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'registry.db').as_posix()}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine, expire_on_commit=False)()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
 def test_assessment_endpoint_does_not_persist_upload(tmp_path, monkeypatch):
@@ -54,6 +72,33 @@ def test_synthetic_assessment_uses_synthetic_status():
     assert result.provenance_status == "synthetic"
     assert result.items[0].provenance_status == "synthetic"
     assert result.validation.provenance_status == "synthetic"
+
+
+@pytest.mark.parametrize(
+    ("include_synthetic", "synthetic"),
+    [(False, "false"), (True, "")],
+    ids=("missing-flag-column", "blank-flag"),
+)
+def test_assessment_accepts_unknown_synthetic_flag_as_uploaded(
+    include_synthetic, synthetic
+):
+    result = asyncio.run(
+        main.assess_csv(
+            _upload(
+                _csv(
+                    include_synthetic=include_synthetic,
+                    synthetic=synthetic,
+                )
+            )
+        )
+    )
+
+    assert result.records_received == 1
+    assert result.data_source == "uploaded"
+    assert result.is_synthetic is None
+    assert result.provenance_status == "uploaded_unverified"
+    assert result.items[0].is_synthetic is None
+    assert result.items[0].provenance_status == "uploaded_unverified"
 
 
 def test_legacy_upload_route_is_deprecated_assessment_alias(caplog):
@@ -133,7 +178,7 @@ def test_training_upload_is_forbidden_without_admin_key(monkeypatch, tmp_path):
 
 
 def test_training_upload_hashes_data_and_never_overwrites(
-    monkeypatch, tmp_path, permissive_training_thresholds
+    monkeypatch, tmp_path, permissive_training_thresholds, database_session
 ):
     content = _csv()
     monkeypatch.setattr(main.settings, "admin_api_key", "test-secret")
@@ -144,6 +189,7 @@ def test_training_upload_hashes_data_and_never_overwrites(
             _upload(content),
             x_admin_api_key="test-secret",
             x_uploader="test-operator",
+            db=database_session,
         )
     )
     second = asyncio.run(
@@ -151,6 +197,7 @@ def test_training_upload_hashes_data_and_never_overwrites(
             _upload(content),
             x_admin_api_key="test-secret",
             x_uploader="test-operator",
+            db=database_session,
         )
     )
 

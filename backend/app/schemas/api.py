@@ -72,7 +72,7 @@ class RiskRecord(BaseModel):
     model_version: None
     model_validated: Literal[False]
     data_source: str
-    is_synthetic: bool
+    is_synthetic: bool | None
     under5_population: int
     poverty_rate: float
     malaria_prevalence: float
@@ -134,7 +134,7 @@ class CsvAssessmentItem(BaseModel):
     model_version: None
     model_validated: Literal[False]
     data_source: Literal["uploaded"]
-    is_synthetic: bool
+    is_synthetic: bool | None
     provenance_status: Literal["synthetic", "uploaded_unverified"]
     facility_type: str | None = None
     region: str | None = None

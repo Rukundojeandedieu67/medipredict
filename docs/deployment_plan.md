@@ -31,7 +31,7 @@ The first useful hosted milestone should be a **synthetic-data staging deploymen
 5. Deploy Render and Vercel to staging with a dedicated private S3 bucket, isolated database, exact CORS origins, and a synthetic fixture explicitly marked `is_synthetic=true`. Verify a full browser-to-API flow, API restart, object checksum, authorization failures, and database/object restore before production planning.
 6. Only after data-owner and privacy/legal approval, create separate production resources, credentials, domains, and retention policies. Treat training jobs and any guide-media service as later, separately approved work.
 
-The existing Render image does not contain the default dashboard CSV: [Dockerfile](../Dockerfile) copies `backend/`, `config/`, and `ml/`, while local [docker-compose.yml](../docker-compose.yml) supplies the CSV through a bind mount. The hosted dashboard will therefore not show its local data merely by deploying the existing image. Do not copy the repository's mixed-provenance dataset into the production image; implement the hosted S3-backed data path first.
+The existing Render image does not contain the default dashboard CSV: [Dockerfile](../Dockerfile) copies `backend/`, `config/`, and `ml/`, while local [docker-compose.yml](../docker-compose.yml) supplies the CSV through a bind mount. For the hosted dashboard, configure its source CSV as a private R2 object and set `MEDIPREDICT_DASHBOARD_DATA_KEY`; do not bake the repository's mixed-provenance dataset into the production image.
 
 ### Immediate deployment blockers
 
@@ -81,7 +81,7 @@ The existing Render image does not contain the default dashboard CSV: [Dockerfil
 
 Use **Cloudflare R2** through its S3-compatible API, subject to owner approval and data-residency review. Divide private object namespaces and API tokens by environment and object class:
 
-The storage implementation adds backend-only R2-compatible reads for the configured dashboard CSV. Dataset intake, verification evidence, and ML artifacts remain filesystem-backed. The new Postgres registry schema is groundwork only; current endpoints do not yet read or write those registry tables. Do not treat dataset records or uploaded files as migrated by configuring the database or R2 variables.
+The backend reads/writes dataset and evidence objects through the selected local or S3-compatible storage, and persists dataset registry metadata plus verification/revocation event records through the SQLAlchemy models. Local mode remains the default. In hosted mode, configure a Neon database, apply migrations through revision `0004`, and set the private R2 endpoint/bucket credentials before accepting uploads. ML artifacts and the dashboard's prediction source remain separate paths; changing storage settings does not import old uploads or make current synthetic data real.
 
 ```text
 staging/
@@ -129,34 +129,33 @@ The requirements column describes what is provider-native versus what MediPredic
 | Location | Current behavior | Postgres implementation requirement |
 |---|---|---|
 | [backend/app/config.py](../backend/app/config.py) | `database_url` defaults to an absolute SQLite path. A validator resolves relative SQLite URLs against the repo root. | Keep that exact default for local mode. Configure deployment only through environment. Do not coerce Postgres URLs through filesystem/path handling. |
-| [backend/app/database.py](../backend/app/database.py) | Adds SQLite-only `check_same_thread=False`; creates a synchronous SQLAlchemy engine with `pool_pre_ping=True`. | Keep conditional SQLite args. Add the psycopg v3 driver and test connection/pool behavior; use bounded SQLAlchemy pooling for runtime. |
+| [backend/app/database.py](../backend/app/database.py) | Adds SQLite-only `check_same_thread=False`; creates a synchronous SQLAlchemy engine with `pool_pre_ping=True`. | Implemented: conditional SQLite args, psycopg v3, and bounded non-SQLite runtime pooling. Live Neon connectivity remains to be tested. |
 | [backend/migrations/env.py](../backend/migrations/env.py) | Reads `settings.database_url`, configures Alembic, and uses `NullPool`; it already omits SQLite connection args for non-SQLite URLs. | Use the direct Neon URL for migrations. Preserve local SQLite upgrade support. |
 | [backend/alembic.ini](../backend/alembic.ini) | Hardcodes `sqlite:///./medipredict.db`. | Treat this as the local default only; the migration environment currently overrides it from settings. Never put a production URL in the file. |
-| [backend/migrations/versions/0002_add_provenance_columns.py](../backend/migrations/versions/0002_add_provenance_columns.py) | Backfill SQL assigns integer `1` into Boolean columns, which is SQLite-specific. | Make the migration dialect-safe in a later implementation stage, e.g. use a proper SQL boolean literal/SQLAlchemy expression. Test it against PostgreSQL before deployment. |
+| [backend/migrations/versions/0002_add_provenance_columns.py](../backend/migrations/versions/0002_add_provenance_columns.py) | Uses a SQLAlchemy Boolean expression for the provenance backfill. | Offline PostgreSQL SQL rendering passes; live Postgres migration testing is still required. |
 | [backend/app/main.py](../backend/app/main.py) | Calls `Base.metadata.create_all()` only when the configured engine is SQLite. | For Postgres, run `alembic -c backend/alembic.ini upgrade head` as a release/migration task with the direct connection string. |
-| Existing ORM/migrations | Baseline migration creates facilities, medicines, logs, predictions; provenance migration adds source flags. Baseline downgrade deliberately raises and must not drop application tables. | Add new registry/audit migrations forward-only. Test downgrade from the provenance revision to baseline only; do not attempt to downgrade past the intentionally non-destructive baseline. |
+| Existing ORM/migrations | Baseline creates facilities, medicines, logs, and predictions; later revisions add provenance, alert state, and dataset, event, and model-release registry tables. Baseline downgrade deliberately raises and must not drop application tables. | Apply forward with Alembic. Verify migrations on a disposable Postgres/Neon branch; do not attempt to downgrade past the intentionally non-destructive baseline. |
 | Tests | Several backend tests explicitly use SQLite in-memory engines. | Preserve these local fast tests and add an isolated Postgres integration suite; do not mistake SQLite green tests for Postgres migration compatibility. |
 
 ### Driver and Neon connection policy
 
-- Use SQLAlchemy’s synchronous `postgresql+psycopg://` driver with **psycopg 3**. Add the installed driver to [backend/requirements.txt](../backend/requirements.txt) when implementation begins and pin it consistently with the project’s dependency policy.
+- Use SQLAlchemy’s synchronous `postgresql+psycopg://` driver with **psycopg 3**, declared in [backend/requirements.txt](../backend/requirements.txt).
 - Runtime API: use Neon’s **pooled** connection string (PgBouncer/transaction pooling) to avoid exhausting backend connections. Set a small SQLAlchemy pool, keep transactions short, and do not rely on session-level settings or prepared statements that are incompatible with transaction pooling.
 - Alembic/release task: use Neon’s **direct** connection string, not the pooler. Current [migration `env.py`](../backend/migrations/env.py) uses `NullPool`, which is suitable for a short migration connection; verify it with the selected Neon endpoint/driver.
 - Keep both URLs in the Render secret store. The web service needs only the runtime URL; the migration task receives the direct URL only during a controlled release.
 - Neon Free compute scales to zero after inactivity and the first request can wait for compute startup. Paid Launch can still scale to zero unless configured otherwise. For an interactive production dashboard, decide whether to disable scale-to-zero and budget for always-on compute. Do not treat sleep/wake as an API health failure without an explicit timeout/retry policy.
 
-### Proposed registry/audit schema (design only; no migration in Stage 1)
+### Registry schema and remaining audit controls
 
-The filesystem registry becomes relational tables plus private object storage. These are logical fields, not final SQL or a change to the current ORM:
+The initial SQLAlchemy/Alembic registry is implemented. Dataset bytes/evidence are objects; metadata and verification/revocation event details are stored in the database. Current columns:
 
-| Table | Proposed fields and constraints |
+| Table | Implemented fields |
 |---|---|
-| `datasets` | `dataset_id` (text PK, preserve current `v1-...` identifier format), `sha256` (64 lowercase hex, required), `object_key` (unique), `object_version_id`, `byte_size`, `row_count`, `date_start`, `date_end`, `data_frequency`, `is_synthetic` (required; never inferred from feature columns), `data_source`, `uploader_subject`, `uploaded_at`, `retention_until`, `created_request_id`. Original bytes and evidence are objects; metadata rows are not file contents. Dataset identity/hash/object key are immutable after registration. |
-| `verification_records` | `verification_id` UUID PK, `dataset_id` FK, `dataset_sha256`, approved `source_id`, `verification_method`, `verification_reference`, reporting period, authenticated `verified_by_subject`, `verified_at`, `single_party`, evidence object key/hash, and request ID. Insert only; no UPDATE/DELETE. A verification is valid only for the exact dataset SHA-256 and approved source/method. |
-| `revocations` | `revocation_id` UUID PK, FK to the verification being revoked, `dataset_id`, `dataset_sha256`, reason, authenticated `revoked_by_subject`, `revoked_at`, request ID. Insert only; never erase the original verification. Active status is derived from the ordered verification/revocation event history. |
-| `audit_log` | Monotonic ID, timestamp, actor subject/role, action, resource type/ID, outcome, request/correlation ID, and minimal structured metadata. Insert only; exclude CSV/evidence contents, presigned URLs, credentials, and unnecessary health/person data. |
+| `datasets` | `dataset_id` primary key, source SHA-256, unique object key, storage backend, byte and row counts, date range, frequency, synthetic flag, source, uploader label, upload timestamp, and structured metadata JSON. |
+| `dataset_events` | UUID event ID, dataset ID and checksum, event type, actor label, timestamp, and event details JSON. New verification/revocation history is reconstructed from these event rows. |
+| `model_releases` | Model version, source dataset reference/hash, artifact key/hash, metadata JSON, synthetic/validation flags, status, and creation timestamp. Existing model workflows do not yet write/read this table. |
 
-Use a distinct application DB role for event insertion with `SELECT`/`INSERT` only on the append-only tables and no `UPDATE`/`DELETE`; add database-side guards as defense in depth. Keep schema-owner credentials out of the web service. If immutable audit export is required, use a separately controlled service with verified WORM support; do not assume R2 provides Object Lock. “Append-only” is a controlled operational guarantee, not cryptographic proof against a privileged database owner; the privilege boundary, external logs, and restore trail must be documented.
+The API currently inserts events, but the schema does not enforce append-only access or separate the application and migration roles. Actor fields still come from caller-supplied headers; they are labels, not authenticated identity. Before production, grant the runtime role only required permissions, deny event update/delete, add database-side guards, and use authenticated actor claims. If immutable audit export is required, use a separately controlled service with verified WORM support; do not assume R2 provides Object Lock.
 
 ### Migration test plan
 
@@ -241,13 +240,13 @@ Run [ml/build_dataset.py](../ml/build_dataset.py), [ml/train.py](../ml/train.py)
 | Output directory | `dist` |
 | API endpoint | Public `VITE_API_URL` for the target backend origin; browser requests append `/api/v1/...`. |
 
-The current app has no `VITE_API_URL` read and makes relative requests. A future code change is required before the hosted UI can reach Render. The variable is bundled into public JavaScript and **must not contain credentials**.
+The app makes relative requests. [frontend/vercel.json](../frontend/vercel.json) rewrites `/api/*` to Render on Vercel, while [frontend/vite.config.ts](../frontend/vite.config.ts) keeps local requests proxied to `http://localhost:8000`. Ensure the rewrite is present in the deployed Vercel branch. Never put API credentials in frontend configuration.
 
 | Environment | `VITE_API_URL` | Data target |
 |---|---|---|
-| Local | Empty/same-origin relative path with existing Vite `/api` proxy to `http://localhost:8000`. | Local SQLite and local storage, as today. |
-| Preview | Fixed staging API origin, e.g. the chosen staging Render hostname. | Staging database and staging bucket only; synthetic data only. |
-| Production | Production Render API origin. | Production Neon project and production bucket only, after approval gates. |
+| Local | Vite `/api` proxy to `http://localhost:8000`. | Local SQLite and local filesystem by default. |
+| Preview | Vercel rewrite to the configured Render staging API. | Staging database and bucket only; synthetic data only. |
+| Production | Vercel rewrite to the configured Render production API. | Production Neon project and private R2 bucket only, after approval gates. |
 
 ### CORS, previews, and plan terms
 
@@ -406,9 +405,9 @@ The completed implementation slice is recorded in the phase report; remaining wo
 | Stage | Work | Exit criteria |
 |---|---|---|
 | 0. Approvals | Resolve the questions in §13; classify datasets; obtain written data-owner and counsel decisions on residency, service providers, approved uses, retention, access, and retention locks. | Approved data inventory, data-flow diagram, hosting region, provider/processor approval, retention schedule, budget owner. |
-| 1. Local boundary | Complete storage and dashboard-data interfaces with `local` as the unchanged default. The first R2 dashboard CSV reader is implemented; extend the abstraction to existing uploads, metadata, evidence hashing, verification, revocation, and local ML feature-building. | Existing local workflow and SQLite tests pass unchanged; no secret/cloud requirement in local mode. |
-| 2. Postgres compatibility | **Foundation implemented:** psycopg 3 dependency, PostgreSQL URL normalization, bounded SQLAlchemy pool, dialect-neutral provenance backfill, Postgres startup no longer runs `create_all()`, and Alembic-managed dataset/event/model registry tables. Docker Compose includes an opt-in migration job. | Remaining: verify empty/seeded migrations and connection behavior on disposable Postgres/Neon; implement/secure registry writes and immutable audit enforcement; check re-upgrade/rollback policy. |
-| 3. Object store | Extend the existing R2-compatible dashboard reader into dataset/evidence/model storage with private bucket-scoped credentials, immutable keys, SHA-256 checks, upload quarantine, and limited signed access only where needed. Verify backup/retention guarantees; choose a separate WORM service if mandatory. | Integration tests prove private access, upload constraints, tamper rejection, role boundaries, and recoverability. |
+| 1. Local boundary | Dashboard data and new dataset/evidence objects use the storage abstraction; `local` remains the unchanged default. New dataset metadata and verification/revocation events use the database registry. | Local SQLite/files workflows and tests pass; no cloud credentials are required in local mode. Existing filesystem-only dataset records remain supported; no bulk migration is performed. |
+| 2. Postgres compatibility | **Foundation and registry integration implemented:** psycopg 3, PostgreSQL URL normalization, bounded pool, dialect-neutral backfill, no Postgres `create_all()`, registry schema, and dataset metadata/event writes. | Still require a disposable/live Neon migration and transaction test, separate least-privilege app/migration roles, database-enforced append-only controls, and a tested backup/restore. |
+| 3. Object store | Dashboard CSV, new dataset upload and evidence bytes use backend-only S3-compatible storage; dataset reads validate SHA-256 and object keys are server-generated. | Mocked S3 tests pass. Live R2 permission, upload/recovery, size, and role tests remain necessary. Model artifacts and existing uploads are not automatically moved. |
 | 4. Auth and audit | Adopt OIDC/SSO/MFA; authorize upload/verify/revoke/download roles; derive actor identity from claims; add rate limits and redacted audit events. | Negative authorization tests pass; uploader/verifier separation is enforced; no secrets enter browser bundles or logs. |
 | 5. ML jobs and artifact release | Containerize build/train as a separate job; pin dependencies; read approved object IDs; write immutable artifacts with manifests/checksums; secure promotion and loader verification. | Temporal validation and data provenance gates pass; no job runs in web process; serving path is tested against trusted release only. |
 | 6. Frontend/API staging | Use the same-origin `/api` Vercel rewrite to Render while preserving the local Vite proxy; configure staging preview, Render staging API, exact origins, readiness, observability, and a synthetic fixture served from R2. | End-to-end browser-to-API staging, upload, admin auth, restart, object checksum, and preview isolation tests pass. |
@@ -429,11 +428,11 @@ The completed implementation slice is recorded in the phase report; remaining wo
 ### Remaining risks
 
 - No data owner, privacy lead, legal counsel, residency decision, user volume, data volume, or budget information was available in the repository.
-- Current files and jobs are still mostly local-path oriented; only the dashboard CSV read path has an R2-compatible implementation, and R2/Postgres have not been integration-tested against hosted accounts.
-- The current SQLite migrations have not been proven on Postgres; the Boolean backfill is SQLite-specific.
-- Current API startup creates tables directly; migration/deploy sequencing must change before multiple instances or production.
+- ML artifacts, feature-building, and some legacy dataset flows remain local-path oriented; neither R2 nor Neon has been integration-tested against the owner's accounts.
+- SQLite migration tests and PostgreSQL offline SQL rendering pass, but migrations have not been applied to a live Postgres/Neon branch.
+- Postgres API startup does not create tables; deployment must run Alembic through revision `0004` before starting the API.
 - The current shared admin key and caller-supplied identity headers do not provide real user identity or robust separation of duties.
-- Dataset/evidence writes are file-based and not transactionally coordinated with the database today; eventual migration needs idempotent object registration and orphan cleanup.
+- Dataset object writes and database registry writes are coordinated with rollback cleanup for ordinary request failures, but a process crash can still leave an orphan object; a reconciliation/cleanup job is not implemented. Existing filesystem-only uploads are not auto-imported.
 - The currently configured model loader, artifact outputs, and provenance registry do not share one storage contract. `joblib.load()` must only see trusted artifacts.
 - Render free sleep, ephemeral filesystem, Neon Free compute sleep/limits, Vercel Hobby commercial restrictions, and provider service availability make free-tier composition unsuitable for production.
 - R2 pricing, account configuration, backup/recovery, retention, and any separate WORM service costs still require owner review.
@@ -486,4 +485,18 @@ These are intentional decision gates, not assumptions. Please answer before impl
   - `docker compose config --quiet`: passed after fixing Compose indentation.
   - `docker build -t medipredict-api:phase-db .`: could not run because Docker Desktop's Linux engine was unavailable (`dockerDesktopLinuxEngine` named pipe not found).
   - `git diff --check`: passed; Git reported only existing/configured LF-to-CRLF working-copy warnings.
-- **Known limitations:** No Neon/Postgres server or credentials were available, so no live migration, pool, or transaction test was run. Docker image build/runtime could not be verified because the local Docker daemon is stopped/unavailable. Dataset registry tables are schema-only; existing upload/evidence/event files, dashboard data, predictions, and ML artifacts are not yet persisted through them or moved to R2. The database event table has no database-enforced append-only policy or role separation yet. Current source data remains synthetic/mixed provenance; real-data training is still blocked pending an approved labeled dataset.
+- **Known limitations:** No Neon/Postgres server or credentials were available, so no live migration, pool, or transaction test was run. Docker image build/runtime could not be verified because the local Docker daemon is stopped/unavailable. At this earlier phase, the dataset registry tables were schema-only; this is superseded by the durable dataset/provenance persistence phase report below. Current source data remains synthetic/mixed provenance; real-data training is still blocked pending an approved labeled dataset.
+
+## Phase report
+
+- **Phase:** Durable dataset and provenance persistence; local SQLite/files remain the default.
+- **Files changed:** `backend/app/main.py`, `backend/app/storage.py`, `backend/tests/test_csv_endpoints.py`, `backend/tests/test_provenance.py`, `backend/tests/test_storage.py`, `docker-compose.yml`, `docs/deployment_plan.md`.
+- **Code/schema changes:** Dataset upload now writes CSV bytes through the configured local or S3-compatible object store, verifies the stored SHA-256, and saves metadata plus upload events in `datasets`/`dataset_events`. Dataset detail, listing, and provenance resolution read from the registry; verification and revocation events are persisted in the database, and evidence bytes are stored as checksum-verified objects. Local storage preserves the existing files and `metadata.json` sidecar. CSV reads are bounded at 20 MiB, and local object keys reject path traversal. Compose passes object-store settings while keeping SQLite and local storage as defaults.
+- **Commands run:**
+  - `& .\backend\.venv\Scripts\python.exe -m pytest backend\tests\test_csv_endpoints.py backend\tests\test_provenance.py backend\tests\test_storage.py`: passed; `35 passed in 5.25s`.
+  - `& .\backend\.venv\Scripts\python.exe -m pytest backend\tests`: passed; `139 passed in 82.03s`.
+  - `docker compose config --quiet`: passed.
+  - `& .\backend\.venv\Scripts\python.exe -m py_compile backend\app\main.py backend\app\storage.py backend\app\models\entities.py`: passed.
+  - `git diff --check`: passed; Git emitted its configured LF-to-CRLF working-copy warning.
+  - Live checks with `curl.exe`: Render `/api/v1/health`, `/api/v1/inventory/summary`, `/api/v1/predictions/risk-register?limit=1`, `/api/v1/alerts`, `/api/v1/transfers/recommendations`, and `/api/v1/analytics/trust-metrics` each returned HTTP `200`; Vercel frontend returned HTTP `200`. These reflect the deployment before the new changes are pushed.
+- **Known limitations:** S3/R2 behavior is mocked in tests; no live R2 bucket or Neon database credentials were available. Configure Render with the Neon runtime URL, run Alembic through revision `0004` using the direct URL, configure private R2 credentials, then deploy these changes. Existing local uploads are not auto-migrated. A process crash between object write and DB commit can leave an orphan object; reconciliation is not implemented. Dataset event writes are not protected by database-enforced append-only grants, and actor identity remains caller-supplied. The dashboard's operational source remains synthetic demonstration data and current risk output remains rule-based; this work does not create genuine data or a trained model.

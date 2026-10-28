@@ -49,13 +49,53 @@ async function getResponseError(response: Response): Promise<string> {
       };
       if (typeof payload.detail === "string") return payload.detail;
       if (typeof payload.message === "string") return payload.message;
-      if (
-        typeof payload.detail === "object" &&
-        payload.detail !== null &&
-        "message" in payload.detail &&
-        typeof (payload.detail as { message: unknown }).message === "string"
-      ) {
-        return (payload.detail as { message: string }).message;
+      if (typeof payload.detail === "object" && payload.detail !== null) {
+        const detail = payload.detail as {
+          message?: unknown;
+          validation?: {
+            errors?: unknown;
+            total_counts?: { errors?: unknown };
+          };
+        };
+        const validation = detail.validation;
+        if (Array.isArray(validation?.errors) && validation.errors.length > 0) {
+          const issues = validation.errors
+            .filter(
+              (issue): issue is {
+                row_number?: number | null;
+                column?: string;
+                code?: string;
+                message?: string;
+              } =>
+                typeof issue === "object" &&
+                issue !== null &&
+                "message" in issue &&
+                typeof issue.message === "string"
+            );
+          const shownIssues = issues.slice(0, 5).map((issue) => {
+            const location = [
+              issue.row_number ? `row ${issue.row_number}` : "",
+              issue.column ? `column "${issue.column}"` : "",
+            ]
+              .filter(Boolean)
+              .join(", ");
+            const code = issue.code ? ` [${issue.code}]` : "";
+            return `${location ? `${location}: ` : ""}${issue.message}${code}`;
+          });
+          const totalErrors =
+            typeof validation.total_counts?.errors === "number"
+              ? validation.total_counts.errors
+              : issues.length;
+          const remaining = Math.max(0, totalErrors - shownIssues.length);
+          const summary =
+            typeof detail.message === "string"
+              ? detail.message
+              : "CSV validation failed.";
+          return `${summary} ${shownIssues.join(" ")}${
+            remaining > 0 ? ` And ${remaining} more validation error(s).` : ""
+          }`;
+        }
+        if (typeof detail.message === "string") return detail.message;
       }
       if (Array.isArray(payload.detail)) {
         return payload.detail

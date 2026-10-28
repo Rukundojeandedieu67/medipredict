@@ -15,7 +15,6 @@ REQUIRED_COLUMNS = (
     "stock_on_hand",
     "units_consumed",
     "units_received",
-    "is_synthetic",
 )
 OPTIONAL_NUMERIC_COLUMNS = (
     "lead_time_days",
@@ -137,7 +136,7 @@ def validate_inventory_csv(
     row_dates: dict[int, date] = {}
     numeric_values: dict[int, dict[str, float]] = {}
     parsed_pairs: dict[tuple[str, str], list[tuple[int, date]]] = {}
-    parsed_synthetic: list[bool] = []
+    parsed_synthetic: list[bool | None] = []
 
     def add(
         destination: list[dict[str, Any]],
@@ -150,13 +149,7 @@ def validate_inventory_csv(
 
     missing = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
     for column in missing:
-        message = (
-            "Column is_synthetic is required: true or false. "
-            "Unknown data provenance is not accepted."
-            if column == "is_synthetic"
-            else f"Required column '{column}' is missing."
-        )
-        add(errors, 1, column, "REQUIRED_COLUMN_MISSING", message)
+        add(errors, 1, column, "REQUIRED_COLUMN_MISSING", f"Required column '{column}' is missing.")
 
     if not missing:
         seen_keys: dict[tuple[str, str, date], int] = {}
@@ -255,7 +248,9 @@ def validate_inventory_csv(
             for column in BOOLEAN_COLUMNS:
                 if column in frame.columns:
                     parsed = _parse_boolean(row[column])
-                    if parsed is None:
+                    if parsed is None and not (
+                        column == "is_synthetic" and not str(row[column]).strip()
+                    ):
                         add(
                             errors,
                             row_number,
@@ -265,6 +260,8 @@ def validate_inventory_csv(
                         )
                     elif column == "is_synthetic":
                         parsed_synthetic.append(parsed)
+                elif column == "is_synthetic":
+                    parsed_synthetic.append(None)
 
             if set(identifiers) == {"facility_id", "item_id"} and parsed_date is not None:
                 pair = (identifiers["facility_id"], identifiers["item_id"])
@@ -375,9 +372,12 @@ def validate_inventory_csv(
     limit = settings.max_returned_issues
     valid = total_errors == 0
     complete_synthetic_flags = len(parsed_synthetic) == len(frame)
+    declared_synthetic_flags = [flag for flag in parsed_synthetic if flag is not None]
     synthetic_status = (
         "synthetic"
-        if complete_synthetic_flags and all(parsed_synthetic)
+        if complete_synthetic_flags
+        and declared_synthetic_flags
+        and all(declared_synthetic_flags)
         else "uploaded_unverified"
     )
     return {

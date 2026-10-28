@@ -203,7 +203,12 @@ def _assessment_result(
             "CRITICAL" if stock <= 0 or explicit_stockout
             else risk_from_lead_time(lead_time)
         )
-        synthetic = parse_is_synthetic(row["is_synthetic"])
+        synthetic_value = row.get("is_synthetic")
+        synthetic = (
+            parse_is_synthetic(synthetic_value)
+            if synthetic_value is not None and str(synthetic_value).strip()
+            else None
+        )
         explicit_stockout = explicit_stockout or stock == 0
         items.append(
             CsvAssessmentItem(
@@ -336,6 +341,8 @@ def _dataset_workspace(record: models.DatasetRecord, db: Session):
             max_bytes=MAX_CSV_BYTES,
             backend=record.storage_backend,
         )
+        if hashlib.sha256(content).hexdigest() != record.sha256:
+            raise ObjectStorageError("Stored dataset object failed its SHA-256 check.")
         data_path = dataset_dir / "data.csv"
         data_path.write_bytes(content)
         metadata = dict(record.metadata_json)
@@ -452,8 +459,17 @@ async def training_upload(
         metadata_json=metadata,
     )
     metadata_path: Path | None = None
+    object_written = False
     try:
         write_object(object_key, content)
+        object_written = True
+        stored_content = read_object(
+            object_key,
+            max_bytes=MAX_CSV_BYTES,
+            backend=settings.storage_backend,
+        )
+        if hashlib.sha256(stored_content).hexdigest() != digest:
+            raise ObjectStorageError("Stored dataset failed its SHA-256 check.")
         if settings.storage_backend == "local":
             metadata_path = settings.uploads_path / "v1" / dataset_id / "metadata.json"
             metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -469,6 +485,16 @@ async def training_upload(
         db.commit()
     except (ObjectStorageError, StorageConfigurationError) as exc:
         db.rollback()
+        if object_written:
+            try:
+                delete_object(object_key, backend=settings.storage_backend)
+            except (ObjectStorageError, StorageConfigurationError):
+                logger.exception("Failed to remove a dataset object after upload failure.")
+        if metadata_path is not None:
+            try:
+                metadata_path.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("Failed to remove local dataset metadata after upload failure.")
         logger.exception("Could not store uploaded dataset.")
         raise HTTPException(
             503, "Dataset could not be saved to configured storage."

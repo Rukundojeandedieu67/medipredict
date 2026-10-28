@@ -24,10 +24,10 @@ const REQUIRED_COLUMNS = [
   { name: "stock_on_hand", type: "number", description: "Available stock units on hand (&ge; 0)" },
   { name: "units_consumed", type: "number", description: "Units dispensed/consumed during period (&ge; 0)" },
   { name: "units_received", type: "number", description: "Units received into inventory during period (&ge; 0)" },
-  { name: "is_synthetic", type: "boolean", description: "State whether the records are synthetic: true or false" },
 ];
 
 const OPTIONAL_COLUMNS = [
+  { name: "is_synthetic", type: "boolean", description: "Set true for synthetic records; if omitted, synthetic status is unknown" },
   { name: "stockout_flag", type: "boolean", description: "Explicit stockout indicator (true/false)" },
   { name: "lead_time_days", type: "number", description: "Supplier replenishment lead time in days" },
   { name: "reorder_level", type: "number", description: "Facility safety threshold for reordering" },
@@ -334,7 +334,7 @@ export function UploadView({
                     <Icon name="check" size={12} />
                   </div>
                   <div>
-                    <strong>Explicit provenance:</strong> The <code>is_synthetic</code> column must contain <code>true</code> or <code>false</code>. Unknown provenance is rejected.
+                    <strong>Synthetic data:</strong> Set <code>is_synthetic=true</code> for synthetic records. If the column is omitted, the data is treated as uploaded with unknown synthetic status.
                   </div>
                 </li>
                 <li>
@@ -620,7 +620,7 @@ export function UploadView({
           </div>
 
           <div className="specs-section">
-            <h3 className="specs-heading">2. Optional Enrichment Columns</h3>
+            <h3 className="specs-heading">2. Optional Provenance &amp; Enrichment Columns</h3>
             <div className="table-responsive">
               <table className="data-table full-width">
                 <thead>

@@ -60,8 +60,8 @@ export function ProvenanceBadge({
 }: {
   item: Pick<
     RiskRecord,
-    "method" | "data_source" | "is_synthetic" | "provenance_status"
-  > & { verification?: VerificationBlock | null };
+    "method" | "data_source" | "provenance_status"
+  > & { is_synthetic: boolean | null; verification?: VerificationBlock | null };
 }) {
   return (
     <div className="provenance-badges">

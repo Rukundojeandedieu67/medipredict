@@ -12,7 +12,7 @@ This contract applies to CSV validation, assessment, and restricted training-dat
 | `stock_on_hand` | Finite number | Count of stock units on hand at the reported date; zero or greater. |
 | `units_consumed` | Finite number | Stock units consumed for the reported daily or monthly reporting period; zero or greater. |
 | `units_received` | Finite number | Stock units received for the reported daily or monthly reporting period; zero or greater. |
-| `is_synthetic` | Boolean text or boolean | `true` or `false`, case-insensitive. Unknown or blank provenance is rejected. |
+| `is_synthetic` | Optional boolean text or boolean | Set to `true` for synthetic records. If omitted or blank, synthetic status remains unknown and the upload is treated as uploaded; the system does not assume `false`. |
 
 The CSV does not encode a universal package unit. `stock_on_hand`, `units_consumed`, `units_received`, and `reorder_level` must use the same item-specific unit consistently. `units_consumed` and `units_received` represent the quantities recorded for that row's date. `lead_time_days` is measured in days.
 
@@ -62,7 +62,7 @@ The API-side frequency is configured with `MEDIPREDICT_DATA_FREQUENCY=daily|mont
 - Deprecated `POST /api/v1/data/upload-csv` is an alias for `/assess-csv`.
 - `MEDIPREDICT_ADMIN_API_KEY` configures the training-upload API key. Send it in `X-Admin-API-Key`; optionally identify the uploader with `X-Uploader`. Without the configured key, training upload is disabled.
 
-Assessment results use `data_source="uploaded"` because the ingest path is an upload; source verification is not required for in-memory assessment or training upload. `is_synthetic` preserves the submitted declaration. Training-upload metadata uses the same ingest-path value and retains the supplied synthetic flag (or `null` when a dataset mixes true and false rows).
+Assessment results use `data_source="uploaded"` because the ingest path is an upload; source verification is not required for in-memory assessment or training upload. `is_synthetic` preserves the submitted declaration and remains `null` when it is omitted, blank, or mixed across records. Training-upload metadata uses the same ingest-path value and retains the supplied synthetic flag (or `null` when it is unknown or mixed).
 
 Provenance status is derived and is never accepted from request data: `synthetic` for a dataset marked synthetic, `uploaded_unverified` for a non-synthetic file without a current valid verification record, and `verified` only when an authorized verification record matches the current stored-file SHA-256 and has not been revoked. A reporting period must cover the CSV's date range. If the stored-file hash changes, status falls back to `uploaded_unverified` and a warning is logged. The two-person check compares the stored uploader identity with the administrator identity supplied at verification; if either identity is unavailable, the response marks the verification `single_party`.
 
