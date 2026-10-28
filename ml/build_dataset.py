@@ -11,13 +11,14 @@ import uuid
 import pandas as pd
 
 from backend.app.config import ROOT, settings
+from backend.app.provenance import resolve_provenance
 from backend.app.validation import ValidationConfig, validate_inventory_csv
 from .features import DEFAULT_CALENDAR_PATH, FeatureBuilder
 from .labels import LabelMode, build_labels, label_prevalence
 from .leakage import target_leakage_diagnostics
 from .missingness import profile_inventory_missingness
 from .periods import DataFrequency, parse_boolean
-from .splits import grouped_unseen_split, time_based_split
+from .splits import assign_time_splits, grouped_unseen_split, time_based_split
 
 DATASET_ID_PATTERN = re.compile(r"^v1-\d{8}T\d{6}Z-[0-9a-f]{32}$")
 DEFAULT_OUTPUT_ROOT = ROOT / "ml" / "artifacts" / "feature_tables"
@@ -62,11 +63,7 @@ def _load_registered_dataset(
     return frame, metadata, digest
 
 
-def _key_tuples(frame: pd.DataFrame) -> set[tuple[str, str, pd.Timestamp]]:
-    return {
-        (str(row.facility_id), str(row.item_id), pd.Timestamp(row.date))
-        for row in frame[["facility_id", "item_id", "date"]].itertuples(index=False)
-    }
+
 
 
 def _table(rows: list[dict[str, object]], columns: tuple[str, ...]) -> str:
@@ -94,6 +91,7 @@ def build_dataset(
 ) -> Path:
     source_root = uploads_root or settings.uploads_path
     raw, registry, digest = _load_registered_dataset(dataset_id, source_root)
+    provenance = resolve_provenance(dataset_id, source_root)
     registered_frequency = str(registry.get("data_frequency", "daily"))
     data_frequency = frequency or registered_frequency
     if registered_frequency != data_frequency:
@@ -172,34 +170,29 @@ def build_dataset(
     features = builder.transform(raw)
     feature_rows = features.reset_index(drop=True)
     output = feature_rows.merge(
-        labeled[["facility_id", "item_id", "date", "target", "label_status", "label_window_start", "label_window_end"]],
+        labeled[[
+            "facility_id", "item_id", "date", "target", "label_status",
+            "label_window_start", "label_window_end", "label_event_date",
+            "label_event_offset",
+        ]],
         on=["facility_id", "item_id", "date"],
         how="left",
         validate="one_to_one",
     )
 
-    assignments: dict[tuple[str, str, pd.Timestamp], str] = {}
-    for split_name, split_frame in split["splits"].items():
-        assignments.update({key: split_name for key in _key_tuples(split_frame)})
-    output["time_split"] = [
-        assignments.get((str(row.facility_id), str(row.item_id), pd.Timestamp(row.date)))
-        for row in output[["facility_id", "item_id", "date"]].itertuples(index=False)
-    ]
-    grouped_assignments: dict[tuple[str, str, pd.Timestamp], str] = {}
-    for split_name, split_frame in grouped["splits"].items():
-        grouped_assignments.update(
-            {key: split_name for key in _key_tuples(split_frame)}
-        )
-    output["group_split"] = [
-        grouped_assignments.get((str(row.facility_id), str(row.item_id), pd.Timestamp(row.date)))
-        for row in output[["facility_id", "item_id", "date"]].itertuples(index=False)
-    ]
+    output["time_split"] = assign_time_splits(
+        output, split["boundaries"], frequency=data_frequency
+    )
+    held_out_groups = set(grouped["boundaries"]["test_groups"])
+    output["group_split"] = output[group_column].astype(str).map(
+        lambda value: "test" if value in held_out_groups else "train"
+    )
     prevalence = label_prevalence(labels)
     missingness = profile_inventory_missingness(raw, frequency=data_frequency)
     diagnostic_rows = output.loc[
         output["time_split"].isin(("train", "validation"))
-        & output["target"].notna()
     ]
+    diagnostic_rows = diagnostic_rows.loc[diagnostic_rows["target"].notna()]
     diagnostics = target_leakage_diagnostics(
         diagnostic_rows[builder.feature_list],
         diagnostic_rows[["target"]],
@@ -218,9 +211,22 @@ def build_dataset(
     metadata_path = destination / "metadata.json"
     report_path = destination / "report.md"
     metadata = {
+        "notice": (
+            "SYNTHETIC - not evidence of real-world performance"
+            if contains_synthetic
+            else "Feature dataset construction metadata"
+        ),
         "dataset_id": dataset_id,
         "dataset_hash": digest,
         "data_source": "uploaded",
+        "provenance_status": provenance["provenance_status"],
+        "verification": provenance["verification"],
+        "verified_dataset_hash": (
+            provenance["verification"]["dataset_sha256"]
+            if provenance["provenance_status"] == "verified"
+            and provenance["verification"] is not None
+            else None
+        ),
         "build_id": version,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "row_count": len(output),
@@ -356,7 +362,13 @@ def main() -> None:
         output_root=args.output_root,
         calendar_path=args.calendar,
     )
-    print(f"Feature dataset saved: {output}")
+    metadata = json.loads((output / "metadata.json").read_text(encoding="utf-8"))
+    prefix = (
+        "SYNTHETIC - not evidence of real-world performance | "
+        if metadata["is_synthetic"]
+        else ""
+    )
+    print(f"{prefix}Feature dataset saved: {output}")
 
 
 if __name__ == "__main__":

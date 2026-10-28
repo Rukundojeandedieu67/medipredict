@@ -36,9 +36,11 @@ from sklearn.inspection import permutation_importance
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from backend.app.config import settings
+from backend.app.provenance import ProvenanceError, resolve_provenance
 from .leakage import target_leakage_diagnostics
 from .promote import evaluate_promotion_gate
-from .splits import grouped_unseen_split, time_based_split
+from .splits import assign_time_splits, grouped_unseen_split, time_based_split
 
 LOGGER = logging.getLogger("ml.train")
 FEATURE_ROOT = Path(__file__).resolve().parent / "artifacts" / "feature_tables"
@@ -90,19 +92,25 @@ def _load_feature_table(directory: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
         raise FileNotFoundError("Feature dataset must contain metadata.json and features.csv.")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     required = (
-        "dataset_id", "dataset_hash", "build_id", "frequency", "horizon",
-        "feature_list", "feature_builder_state", "is_synthetic", "validation", "split_boundaries",
-        "leakage_diagnostics", "feature_table_sha256", "feature_table_row_count",
+        "dataset_id", "dataset_hash", "data_source", "build_id", "frequency",
+        "horizon", "label_mode", "feature_list", "feature_availability",
+        "feature_builder_state", "feature_lineage", "is_synthetic", "validation",
+        "split_boundaries", "leakage_diagnostics", "feature_table_sha256",
+        "feature_table_row_count", "row_count", "group_column",
     )
     missing = [field for field in required if field not in metadata]
     if missing:
         raise ValueError(f"Feature dataset metadata is missing: {', '.join(missing)}")
     if metadata.get("validation", {}).get("valid") is not True:
         raise ValueError("Feature dataset failed validation.")
+    if metadata["data_source"] != "uploaded":
+        raise ValueError("Feature dataset must originate from the registered upload pipeline.")
     if metadata["build_id"] != directory.name:
         raise ValueError("Feature build ID does not match the feature-table directory.")
     if metadata["frequency"] not in ("daily", "monthly") or int(metadata["horizon"]) < 1:
         raise ValueError("Feature dataset has invalid frequency or horizon metadata.")
+    if metadata["frequency"] == "monthly" and int(metadata["horizon"]) not in (1, 2):
+        raise ValueError("Monthly feature dataset horizon must be one or two periods.")
     if metadata["feature_builder_state"].get("feature_list") != metadata["feature_list"]:
         raise ValueError("FeatureBuilder state does not match the feature dataset schema.")
     if not isinstance(metadata["is_synthetic"], bool):
@@ -119,6 +127,12 @@ def _load_feature_table(directory: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
         raise ValueError("Feature table SHA-256 does not match its build metadata.")
     if len(frame) != metadata["feature_table_row_count"]:
         raise ValueError("Feature table row count does not match its build metadata.")
+    if len(frame) != metadata["row_count"]:
+        raise ValueError("Feature table row count does not match its recorded dataset row count.")
+    if not isinstance(metadata["dataset_hash"], str) or not re.fullmatch(
+        r"[0-9a-f]{64}", metadata["dataset_hash"]
+    ):
+        raise ValueError("Feature metadata has no valid registered-dataset SHA-256.")
     synthetic_flags = frame["is_synthetic"].map(_parse_synthetic_flag)
     if synthetic_flags.isna().any() or not synthetic_flags.eq(metadata["is_synthetic"]).all():
         raise ValueError("Feature-table is_synthetic values do not match dataset metadata.")
@@ -136,6 +150,80 @@ def _parse_synthetic_flag(value: object) -> bool | None:
     return None
 
 
+def _current_dataset_provenance(
+    metadata: dict[str, Any],
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    if metadata.get("is_synthetic") is True:
+        return "synthetic", None, None
+    dataset_id = metadata.get("dataset_id")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        return "uploaded_unverified", None, None
+    try:
+        current = resolve_provenance(dataset_id, settings.uploads_path)
+    except (FileNotFoundError, OSError, ProvenanceError) as exc:
+        LOGGER.warning(
+            "Source dataset provenance could not be rechecked for training: %s", exc
+        )
+        return "uploaded_unverified", None, None
+    verification = current.get("verification")
+    if (
+        current.get("provenance_status") == "verified"
+        and isinstance(verification, dict)
+        and verification.get("dataset_sha256") == metadata.get("dataset_hash")
+    ):
+        return "verified", verification, verification["dataset_sha256"]
+    return str(current.get("provenance_status", "uploaded_unverified")), None, None
+
+
+def _validate_training_history(
+    frame: pd.DataFrame,
+    *,
+    frequency: str,
+    minimum_history_periods: int,
+    minimum_facilities: int,
+) -> tuple[int, int, int]:
+    history_period_count = int(
+        pd.to_datetime(frame["date"], format="%Y-%m-%d")
+        .dt.to_period("M" if frequency == "monthly" else "D")
+        .nunique()
+    )
+    required_history = max(24, minimum_history_periods) if frequency == "monthly" else 1
+    if history_period_count < required_history:
+        unit = "months" if frequency == "monthly" else "days"
+        raise ValueError(
+            f"Feature dataset has {history_period_count} distinct {unit}; "
+            f"at least {required_history} are required."
+        )
+    distinct_facilities = int(frame["facility_id"].nunique())
+    if distinct_facilities < minimum_facilities:
+        raise ValueError(
+            f"Feature dataset has {distinct_facilities} distinct facilities; "
+            f"at least {minimum_facilities} are required."
+        )
+    return history_period_count, required_history, distinct_facilities
+
+
+def _validate_split_positives(
+    split_name: str,
+    frame: pd.DataFrame,
+    *,
+    minimum_positives: int,
+    require_both_classes: bool = True,
+) -> int:
+    positives = int(pd.to_numeric(frame["target"], errors="raise").sum())
+    if positives < minimum_positives:
+        raise ValueError(
+            f"{split_name} split has {positives} positives; at least "
+            f"{minimum_positives} are required."
+        )
+    if require_both_classes and frame["target"].nunique() < 2:
+        raise ValueError(
+            f"{split_name} split has only one label class; model selection and "
+            "calibration require both positive and negative labels."
+        )
+    return positives
+
+
 def _observation_keys(frame: pd.DataFrame) -> list[tuple[str, str, pd.Timestamp]]:
     return [
         (str(row.facility_id), str(row.item_id), pd.Timestamp(row.date))
@@ -151,19 +239,6 @@ def _assignment_map(split_result: dict[str, Any]) -> dict[tuple[str, str, pd.Tim
     return assignments
 
 
-def _summary_structure(summary: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: summary.get(key)
-        for key in ("row_count", "labeled_row_count", "start", "end")
-    }
-
-
-def _label_presence_only(targets: pd.Series) -> pd.Series:
-    presence = pd.Series(pd.NA, index=targets.index, dtype="Int64")
-    presence.loc[targets.notna()] = 0
-    return presence
-
-
 def _validate_time_split_metadata(
     frame: pd.DataFrame,
     metadata: dict[str, Any],
@@ -171,21 +246,26 @@ def _validate_time_split_metadata(
     frequency = metadata["frequency"]
     horizon = int(metadata["horizon"])
     split_input = frame[["facility_id", "item_id", "date"]].copy()
-    split_input["target"] = _label_presence_only(frame["target"])
+    split_input["target"] = 0
     recomputed = time_based_split(
         split_input,
         horizon=horizon,
         frequency=frequency,
         minimum_positives=0,
     )
-    expected = _assignment_map(recomputed)
+    expected_values = assign_time_splits(
+        frame, recomputed["boundaries"], frequency=frequency
+    ).tolist()
+    expected = [
+        None if pd.isna(value) or str(value).strip() == "" else str(value)
+        for value in expected_values
+    ]
     actual_values = frame["time_split"]
     actual = [
         None if pd.isna(value) or str(value).strip() == "" else str(value)
         for value in actual_values
     ]
-    expected_values = [expected.get(key) for key in _observation_keys(frame)]
-    if actual != expected_values:
+    if actual != expected:
         raise ValueError("Stored time-split assignments do not match the recomputed split.")
 
     expected_boundaries = recomputed["boundaries"]
@@ -201,13 +281,6 @@ def _validate_time_split_metadata(
     for key in structural_keys:
         if stored_boundaries.get(key) != expected_boundaries.get(key):
             raise ValueError(f"Stored time-split boundary '{key}' failed integrity validation.")
-    for split_name in ("train", "validation", "test"):
-        if _summary_structure(stored_boundaries.get(split_name, {})) != _summary_structure(
-            expected_boundaries[split_name]
-        ):
-            raise ValueError(
-                f"Stored {split_name} split row/date summary failed integrity validation."
-            )
     if len(stored_boundaries.get("purged_before_validation", [])) < horizon:
         raise ValueError("Train/validation purge gap is shorter than the label horizon.")
     if len(stored_boundaries.get("purged_before_test", [])) < horizon:
@@ -224,7 +297,7 @@ def _validate_group_split_metadata(
         raise ValueError("Feature metadata has an invalid unseen-group split column.")
     split_columns = list(dict.fromkeys(["facility_id", "item_id", "date", group_column]))
     split_input = frame[split_columns].copy()
-    split_input["target"] = _label_presence_only(frame["target"])
+    split_input["target"] = 0
     recomputed = grouped_unseen_split(
         split_input,
         group_column=group_column,
@@ -246,29 +319,77 @@ def _validate_group_split_metadata(
     for key in ("group_column", "train_groups", "test_groups"):
         if stored.get(key) != expected_boundaries.get(key):
             raise ValueError(f"Stored unseen-group boundary '{key}' failed integrity validation.")
-    for split_name in ("train", "test"):
-        if _summary_structure(stored.get(split_name, {})) != _summary_structure(
-            expected_boundaries[split_name]
-        ):
-            raise ValueError(
-                f"Stored unseen-group {split_name} row/date summary failed integrity validation."
-            )
+
+
+def _validate_labeled_split_summary(
+    split_name: str,
+    frame: pd.DataFrame,
+    stored: dict[str, Any],
+) -> None:
+    dates = pd.to_datetime(frame["date"], format="%Y-%m-%d", errors="raise")
+    positives = int(pd.to_numeric(frame["target"], errors="raise").sum())
+    actual = {
+        "row_count": len(frame),
+        "labeled_row_count": len(frame),
+        "positive_count": positives,
+        "label_prevalence": positives / len(frame) if len(frame) else None,
+        "start": dates.min().date().isoformat() if len(dates) else None,
+        "end": dates.max().date().isoformat() if len(dates) else None,
+    }
+    for key, value in actual.items():
+        expected = stored.get(key)
+        if key == "label_prevalence" and value is not None and expected is not None:
+            if not np.isclose(float(expected), value):
+                raise ValueError(f"Stored {split_name} label prevalence failed integrity validation.")
+        elif expected != value:
+            raise ValueError(f"Stored {split_name} split summary failed integrity validation.")
+
+
+def _apply_calibrator(calibrator: Any | None, scores: np.ndarray) -> np.ndarray:
+    if calibrator is None:
+        return scores.copy()
+    if isinstance(calibrator, IsotonicRegression):
+        return np.asarray(calibrator.predict(scores), dtype=float)
+    return np.asarray(
+        calibrator.predict_proba(scores.reshape(-1, 1))[:, 1],
+        dtype=float,
+    )
 
 
 def _validation_policy(
     y_validation: np.ndarray,
     validation_scores: np.ndarray,
-    precision_target: float,
+    target: float,
+    *,
+    threshold_objective: str = "precision",
 ) -> tuple[np.ndarray, Any | None, float, dict[str, Any], dict[str, Any]]:
     calibrator = None
-    if len(np.unique(y_validation)) > 1 and len(y_validation) >= 20:
+    positives = int(np.sum(y_validation == 1))
+    negatives = int(np.sum(y_validation == 0))
+    if positives >= 20 and negatives >= 20:
         calibrator = IsotonicRegression(out_of_bounds="clip").fit(
             validation_scores, y_validation
         )
-        calibrated_scores = calibrator.predict(validation_scores)
+        calibrated_scores = _apply_calibrator(calibrator, validation_scores)
         calibration = {
             "method": "isotonic",
             "fit_data": "validation predictions and labels only",
+            "brier_before": float(brier_score_loss(y_validation, validation_scores)),
+            "brier_after": float(brier_score_loss(y_validation, calibrated_scores)),
+            "calibrator": calibrator,
+        }
+    elif positives >= 2 and negatives >= 2:
+        calibrator = LogisticRegression(max_iter=1000, random_state=DEFAULT_SEED).fit(
+            validation_scores.reshape(-1, 1), y_validation
+        )
+        calibrated_scores = _apply_calibrator(calibrator, validation_scores)
+        calibration = {
+            "method": "platt",
+            "fit_data": "validation predictions and labels only",
+            "reason": (
+                "Platt scaling used because validation has fewer than 20 "
+                "positive or negative examples for isotonic calibration."
+            ),
             "brier_before": float(brier_score_loss(y_validation, validation_scores)),
             "brier_after": float(brier_score_loss(y_validation, calibrated_scores)),
             "calibrator": calibrator,
@@ -277,23 +398,40 @@ def _validation_policy(
         calibrated_scores = validation_scores.copy()
         calibration = {
             "method": None,
-            "reason": "validation requires at least 20 rows and both classes",
+            "reason": (
+                "Calibration not computed: validation needs at least two "
+                "examples from each class."
+            ),
             "brier_before": float(brier_score_loss(y_validation, validation_scores)),
             "brier_after": None,
             "calibrator": None,
         }
-    threshold, selection = _threshold_for_precision(
-        y_validation, calibrated_scores, precision_target
+    threshold, selection = _select_operating_threshold(
+        y_validation,
+        calibrated_scores,
+        target,
+        threshold_objective,
     )
     return calibrated_scores, calibrator, threshold, selection, calibration
 
 
-def _rule_scores(frame: pd.DataFrame, frequency: str) -> np.ndarray:
+def _rule_scores(
+    frame: pd.DataFrame,
+    frequency: str,
+    *,
+    critical_limit: float | None = None,
+    moderate_limit: float | None = None,
+) -> np.ndarray:
     cover_column = "days_of_cover" if frequency == "daily" else "months_of_stock"
     if cover_column not in frame:
         raise ValueError(f"Rule baseline requires feature '{cover_column}'.")
     cover = pd.to_numeric(frame[cover_column], errors="coerce").to_numpy(dtype=float)
-    critical_limit, moderate_limit = (7.0, 14.0) if frequency == "daily" else (1.0, 2.0)
+    if critical_limit is None or moderate_limit is None:
+        defaults = (7.0, 14.0) if frequency == "daily" else (0.25, 0.5)
+        critical_limit = defaults[0] if critical_limit is None else critical_limit
+        moderate_limit = defaults[1] if moderate_limit is None else moderate_limit
+    if critical_limit >= moderate_limit:
+        raise ValueError("The critical rule threshold must be lower than the moderate threshold.")
     scores = np.full(len(cover), -0.5, dtype=float)
     finite = np.isfinite(cover)
     scores[finite & (cover < critical_limit)] = 1.0
@@ -322,6 +460,12 @@ class TestSetAccessGuard:
 
 def _feature_columns(frame: pd.DataFrame, metadata: dict[str, Any]) -> list[str]:
     columns = [name for name in metadata["feature_list"] if name in frame.columns]
+    missing = sorted(set(metadata["feature_list"]).difference(frame.columns))
+    if missing:
+        raise ValueError(
+            "Feature table is missing declared feature columns: "
+            + ", ".join(missing)
+        )
     if not columns:
         raise ValueError("No declared Phase 3 features are present in the feature table.")
     return columns
@@ -332,8 +476,8 @@ def _training_validation_leakage_diagnostics(
     feature_columns: list[str],
     feature_lineage: dict[str, dict[str, object]],
 ) -> dict[str, Any]:
-    eligible = frame["time_split"].isin(("train", "validation")) & frame["target"].notna()
-    scoped = frame.loc[eligible]
+    scoped = frame.loc[frame["time_split"].isin(("train", "validation"))]
+    scoped = scoped.loc[scoped["target"].notna()]
     return target_leakage_diagnostics(
         scoped[feature_columns],
         scoped[["target"]],
@@ -440,8 +584,14 @@ def _best_validation_parameters(
         estimator.fit(x_train, y_train)
         score = _safe_pr_auc(y_validation, _probabilities(estimator, x_validation))
         tree_candidates.append((score, {"min_samples_leaf": leaf}, estimator))
-    logistic_best = max(logistic_candidates, key=lambda item: item[0])
-    tree_best = max(tree_candidates, key=lambda item: item[0])
+    logistic_best = max(
+        logistic_candidates,
+        key=lambda item: float("-inf") if item[0] is None else item[0],
+    )
+    tree_best = max(
+        tree_candidates,
+        key=lambda item: float("-inf") if item[0] is None else item[0],
+    )
     return (
         {"logistic_regression": logistic_best[1], "hist_gradient_boosting": tree_best[1]},
         {"logistic_regression": logistic_best[2], "hist_gradient_boosting": tree_best[2]},
@@ -483,8 +633,12 @@ def _fit_group_model(
     return estimator.fit(x_train, y_train)
 
 
-def _safe_pr_auc(y: np.ndarray, scores: np.ndarray) -> float:
-    return float(average_precision_score(y, scores)) if len(np.unique(y)) > 1 else float("nan")
+def _safe_pr_auc(y: np.ndarray, scores: np.ndarray) -> float | None:
+    return (
+        float(average_precision_score(y, scores))
+        if len(np.unique(y)) > 1
+        else None
+    )
 
 
 def _threshold_for_precision(
@@ -534,6 +688,73 @@ def _threshold_for_precision(
     }
 
 
+def _threshold_for_recall(
+    y: np.ndarray,
+    scores: np.ndarray,
+    recall_target: float,
+) -> tuple[float, dict[str, Any]]:
+    precision, recall, thresholds = precision_recall_curve(y, scores)
+    candidates = [
+        (float(precision[index]), float(recall[index]), float(thresholds[index]))
+        for index in range(len(thresholds))
+        if recall[index] >= recall_target
+    ]
+    if candidates:
+        selected = max(candidates, key=lambda item: (item[0], item[1], item[2]))
+        return selected[2], {
+            "selection": "maximum validation precision meeting recall target",
+            "recall_target": recall_target,
+            "operating_target_attained": True,
+            "precision_target_attained": False,
+            "validation_precision": selected[0],
+            "validation_recall": selected[1],
+            "validation_f1": float(
+                f1_score(y, scores >= selected[2], zero_division=0)
+            ),
+        }
+    if len(thresholds):
+        f1_values = [
+            f1_score(y, scores >= threshold, zero_division=0)
+            for threshold in thresholds
+        ]
+        index = int(np.argmax(f1_values))
+        return float(thresholds[index]), {
+            "selection": "maximum validation F1; recall target was unattainable",
+            "recall_target": recall_target,
+            "operating_target_attained": False,
+            "precision_target_attained": False,
+            "validation_precision": float(precision[index]),
+            "validation_recall": float(recall[index]),
+            "validation_f1": float(f1_values[index]),
+        }
+    return 0.5, {
+        "selection": "fixed default; validation scores had no thresholds",
+        "recall_target": recall_target,
+        "operating_target_attained": False,
+        "precision_target_attained": False,
+        "validation_precision": None,
+        "validation_recall": None,
+        "validation_f1": None,
+    }
+
+
+def _select_operating_threshold(
+    y: np.ndarray,
+    scores: np.ndarray,
+    target: float,
+    objective: str,
+) -> tuple[float, dict[str, Any]]:
+    if objective == "precision":
+        threshold, selection = _threshold_for_precision(y, scores, target)
+        selection["operating_target_attained"] = selection[
+            "precision_target_attained"
+        ]
+        return threshold, selection
+    if objective == "recall":
+        return _threshold_for_recall(y, scores, target)
+    raise ValueError("threshold objective must be 'precision' or 'recall'")
+
+
 def _metric_summary(y: np.ndarray, scores: np.ndarray, threshold: float) -> dict[str, Any]:
     predictions = scores >= threshold
     return {
@@ -547,6 +768,12 @@ def _metric_summary(y: np.ndarray, scores: np.ndarray, threshold: float) -> dict
         "rows": int(len(y)),
         "positives": int(y.sum()),
         "threshold": float(threshold),
+        "not_computed_reasons": (
+            {} if len(np.unique(y)) > 1 else {
+                "pr_auc": "requires both positive and negative labels",
+                "roc_auc": "requires both positive and negative labels",
+            }
+        ),
     }
 
 
@@ -568,7 +795,9 @@ def _cluster_bootstrap_pr_difference(
     facilities = list(grouped_indices)
     rng = np.random.default_rng(seed)
     differences: list[float] = []
-    for _ in range(repetitions):
+    attempts = 0
+    while len(differences) < repetitions and attempts < repetitions * 10:
+        attempts += 1
         selected = rng.choice(facilities, size=len(facilities), replace=True)
         indices = np.concatenate([grouped_indices[value] for value in selected])
         if len(np.unique(y[indices])) < 2:
@@ -577,7 +806,7 @@ def _cluster_bootstrap_pr_difference(
             _safe_pr_auc(y[indices], scores[indices])
             - _safe_pr_auc(y[indices], baseline_scores[indices])
         )
-    if not differences:
+    if len(differences) < repetitions:
         return None
     return [
         float(np.quantile(differences, 0.025)),
@@ -593,9 +822,15 @@ def _bootstrap_ci(
     threshold: float,
     repetitions: int,
     seed: int,
-) -> dict[str, list[float] | None]:
+) -> dict[str, Any]:
     if "facility_id" not in frame or frame["facility_id"].nunique() < 2:
-        return {"pr_auc": None, "recall": None}
+        return {
+            "pr_auc": None,
+            "recall": None,
+            "requested_resamples": repetitions,
+            "valid_resamples": 0,
+            "reason": "At least two distinct facilities are required for clustered bootstrap.",
+        }
     groups = {
         str(group): np.flatnonzero(frame["facility_id"].astype(str).to_numpy() == str(group))
         for group in frame["facility_id"].astype(str).unique()
@@ -604,15 +839,30 @@ def _bootstrap_ci(
     rng = np.random.default_rng(seed)
     pr_values: list[float] = []
     recall_values: list[float] = []
-    for _ in range(repetitions):
+    attempts = 0
+    while len(pr_values) < repetitions and attempts < repetitions * 10:
+        attempts += 1
         sample = np.concatenate([groups[name] for name in rng.choice(names, size=len(names), replace=True)])
         if len(np.unique(y[sample])) < 2:
             continue
         pr_values.append(_safe_pr_auc(y[sample], scores[sample]))
         recall_values.append(float(recall_score(y[sample], scores[sample] >= threshold, zero_division=0)))
+    complete = len(pr_values) >= repetitions
     return {
-        "pr_auc": [float(np.quantile(pr_values, 0.025)), float(np.quantile(pr_values, 0.975))] if pr_values else None,
-        "recall": [float(np.quantile(recall_values, 0.025)), float(np.quantile(recall_values, 0.975))] if recall_values else None,
+        "pr_auc": [
+            float(np.quantile(pr_values, 0.025)),
+            float(np.quantile(pr_values, 0.975)),
+        ] if complete else None,
+        "recall": [
+            float(np.quantile(recall_values, 0.025)),
+            float(np.quantile(recall_values, 0.975)),
+        ] if complete else None,
+        "requested_resamples": repetitions,
+        "valid_resamples": len(pr_values),
+        "reason": (
+            None if complete else
+            "not computed: fewer than the requested number of two-class facility-cluster resamples were available."
+        ),
     }
 
 
@@ -650,18 +900,64 @@ def _subgroups(
     return results
 
 
+def _lead_time_summary(
+    frame: pd.DataFrame,
+    *,
+    scores: np.ndarray,
+    threshold: float,
+    frequency: str,
+) -> dict[str, Any]:
+    if "label_event_offset" not in frame:
+        return {
+            "status": "not computed",
+            "reason": "Feature table does not include observed label-event offsets.",
+        }
+    target = pd.to_numeric(frame["target"], errors="coerce").to_numpy(dtype=float)
+    offsets = pd.to_numeric(frame["label_event_offset"], errors="coerce").to_numpy(dtype=float)
+    stockouts = target == 1
+    known_event = stockouts & np.isfinite(offsets)
+    if not known_event.any():
+        return {
+            "status": "not computed",
+            "reason": "No positive test labels have a known event offset.",
+        }
+    flagged_early = (scores >= threshold) & known_event & (offsets >= 1)
+    lead_unit = "months" if frequency == "monthly" else "days"
+    return {
+        "status": "computed",
+        "unit": lead_unit,
+        "stockouts": int(stockouts.sum()),
+        "stockouts_with_known_event_offset": int(known_event.sum()),
+        "flagged_at_least_one_period_ahead": int(flagged_early.sum()),
+        "share_stockouts_flagged_at_least_one_period_ahead": float(
+            flagged_early.sum() / stockouts.sum()
+        ) if stockouts.sum() else None,
+        "lead_time_note": (
+            "Monthly lead time is coarse; finer claims require daily data."
+            if frequency == "monthly"
+            else "Daily event offsets are measured in observed daily periods."
+        ),
+    }
+
+
 def _markdown_report(report: dict[str, Any]) -> str:
     header = report["notice"] if report["is_synthetic"] else "Model evaluation report"
+    lead_unit = "month" if report["data_frequency"] == "monthly" else "day"
     lines = [
         f"# {header}", "",
         "## What this does and does not show", "",
         report["interpretation"], "",
         "## Test metrics (single held-out pass)", "",
-        "| Model | PR-AUC | ROC-AUC | Brier | Precision | Recall | F1 | Rows | Positives |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        f"| Model | PR-AUC | ROC-AUC | Brier | Precision | Recall | F1 | Recall at fixed precision | Stock-outs flagged ≥1 {lead_unit} ahead | Rows | Positives |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, row in report["test_metrics"].items():
-        values = [row.get(key) for key in ("pr_auc", "roc_auc", "brier", "precision", "recall", "f1", "rows", "positives")]
+        values = [row.get(key) for key in (
+            "pr_auc", "roc_auc", "brier", "precision", "recall", "f1",
+            "recall_at_fixed_precision",
+            "share_stockouts_flagged_at_least_one_period_ahead",
+            "rows", "positives",
+        )]
         lines.append("| " + name + " | " + " | ".join("not computed" if value is None else str(value) for value in values) + " |")
     lines.extend(["", "## Clustered bootstrap intervals", "", "| Model | PR-AUC 95% CI | Recall 95% CI | PR-AUC difference vs rule 95% CI |", "|---|---|---|---|"])
     for name, row in report["test_metrics"].items():
@@ -674,6 +970,8 @@ def _markdown_report(report: dict[str, Any]) -> str:
         )
     lines.extend(["", "## Calibration", "", "```json", json.dumps(report["calibration"], indent=2), "```", ""])
     lines.extend(["## Label prevalence", "", "```json", json.dumps(report["label_prevalence"], indent=2), "```", ""])
+    lines.extend(["## Effective sample size", "", "```json", json.dumps(report["effective_sample_size"], indent=2), "```", ""])
+    lines.extend(["## Split boundaries", "", "```json", json.dumps(report["split_boundaries"], indent=2), "```", ""])
     lines.extend(["## Feature availability", "", "```json", json.dumps(report["feature_availability"], indent=2), "```", ""])
     lines.extend(["## Source missingness profile", "", "```json", json.dumps(report["source_missingness"], indent=2), "```", ""])
     lines.extend(["## Lead time", "", "```json", json.dumps(report["lead_time"], indent=2), "```", ""])
@@ -705,21 +1003,64 @@ def train_feature_dataset(
     feature_root: Path = FEATURE_ROOT,
     model_root: Path = MODEL_ROOT,
     precision_target: float = 0.5,
-    minimum_positives: int = 1,
-    minimum_split_positives: int = 5,
+    threshold_objective: str = "precision",
+    threshold_target: float | None = None,
+    minimum_positives: int | None = None,
+    minimum_split_positives: int | None = None,
     minimum_group_positives: int = 5,
+    minimum_history_periods: int = 24,
+    minimum_facilities: int | None = None,
+    daily_cover_thresholds: tuple[float, float] = (7.0, 14.0),
+    monthly_cover_thresholds: tuple[float, float] = (0.25, 0.5),
     seed: int = DEFAULT_SEED,
-    bootstrap_repetitions: int = 200,
+    bootstrap_repetitions: int = 1000,
 ) -> Path:
     if not 0 < precision_target <= 1:
         raise ValueError("precision_target must be in (0, 1].")
-    if minimum_positives < 1 or minimum_split_positives < 1 or minimum_group_positives < 1:
+    if threshold_objective not in ("precision", "recall"):
+        raise ValueError("threshold_objective must be 'precision' or 'recall'.")
+    if threshold_objective == "recall" and threshold_target is None:
+        raise ValueError("threshold_target is required when threshold_objective is 'recall'.")
+    operating_target = (
+        precision_target if threshold_target is None else threshold_target
+    )
+    if not 0 < operating_target <= 1:
+        raise ValueError("threshold_target must be in (0, 1].")
+    if daily_cover_thresholds[0] >= daily_cover_thresholds[1]:
+        raise ValueError("Daily critical threshold must be lower than the moderate threshold.")
+    if monthly_cover_thresholds[0] >= monthly_cover_thresholds[1]:
+        raise ValueError("Monthly critical threshold must be lower than the moderate threshold.")
+    if minimum_split_positives is None:
+        minimum_split_positives = minimum_positives
+    if minimum_split_positives is not None and minimum_split_positives < 1:
+        raise ValueError("minimum_split_positives must be positive.")
+    if minimum_group_positives < 1 or minimum_history_periods < 1:
         raise ValueError("Positive minimum counts are required.")
+    if bootstrap_repetitions < 1000:
+        raise ValueError("At least 1000 facility-cluster bootstrap resamples are required.")
     directory = _resolve_feature_table(feature_dataset_id, feature_root)
     frame, metadata = _load_feature_table(directory)
+    frequency = metadata["frequency"]
+    if minimum_split_positives is None:
+        minimum_split_positives = 30 if frequency == "monthly" else 5
+    if minimum_facilities is None:
+        minimum_facilities = 12 if frequency == "monthly" else 2
+    if minimum_facilities < 2:
+        raise ValueError("At least two distinct facilities are required.")
+    history_period_count, required_history, distinct_facilities = (
+        _validate_training_history(
+            frame,
+            frequency=frequency,
+            minimum_history_periods=minimum_history_periods,
+            minimum_facilities=minimum_facilities,
+        )
+    )
     time_split_valid = _validate_time_split_metadata(frame, metadata)
     _validate_group_split_metadata(frame, metadata)
     is_synthetic = bool(metadata["is_synthetic"])
+    provenance_status, verification, verified_dataset_hash = (
+        _current_dataset_provenance(metadata)
+    )
     _log(f"Starting training for feature build {metadata['build_id']}", is_synthetic=is_synthetic)
 
     features = _feature_columns(frame, metadata)
@@ -735,17 +1076,20 @@ def train_feature_dataset(
     )
     split_frames: dict[str, pd.DataFrame] = {}
     for split_name in ("train", "validation"):
-        part = frame.loc[(frame["time_split"] == split_name) & frame["target"].notna()].copy()
+        part = frame.loc[frame["time_split"] == split_name]
+        part = part.loc[part["target"].notna()].copy()
+        _validate_labeled_split_summary(
+            split_name,
+            part,
+            metadata["split_boundaries"]["time_based"][split_name],
+        )
         if is_synthetic and not part["is_synthetic"].map(
             lambda value: str(value).strip().casefold() == "true"
         ).all():
             raise ValueError(f"Synthetic {split_name} rows are missing is_synthetic=true.")
-        positives = int(pd.to_numeric(part["target"]).sum())
-        if positives < minimum_split_positives:
-            raise ValueError(
-                f"{split_name} split has {positives} positives; at least "
-                f"{minimum_split_positives} are required."
-            )
+        _validate_split_positives(
+            split_name, part, minimum_positives=minimum_split_positives
+        )
         split_frames[split_name] = part
     train = split_frames["train"]
     validation = split_frames["validation"]
@@ -770,7 +1114,12 @@ def train_feature_dataset(
             threshold,
             selection,
             calibration,
-        ) = _validation_policy(y_validation, scores, precision_target)
+        ) = _validation_policy(
+            y_validation,
+            scores,
+            operating_target,
+            threshold_objective=threshold_objective,
+        )
         validation_calibration[name] = {
             **calibration,
             "calibrator": calibrator,
@@ -779,28 +1128,56 @@ def train_feature_dataset(
         thresholds[name] = threshold
         threshold_selection[name] = selection
 
-    chosen_model_name = max(validation_pr, key=validation_pr.get)
-    rule_validation_scores = _rule_scores(validation, metadata["frequency"])
-    rule_threshold, rule_threshold_selection = _threshold_for_precision(
-        y_validation, rule_validation_scores, precision_target
+    chosen_model_name = max(
+        validation_pr,
+        key=lambda name: float("-inf")
+        if validation_pr[name] is None
+        else float(validation_pr[name]),
+    )
+    cover_thresholds = (
+        daily_cover_thresholds
+        if metadata["frequency"] == "daily"
+        else monthly_cover_thresholds
+    )
+    rule_validation_scores = _rule_scores(
+        validation,
+        metadata["frequency"],
+        critical_limit=cover_thresholds[0],
+        moderate_limit=cover_thresholds[1],
+    )
+    rule_threshold, rule_threshold_selection = _select_operating_threshold(
+        y_validation,
+        rule_validation_scores,
+        operating_target,
+        threshold_objective,
     )
     validation_builder_end = metadata.get("split_boundaries", {}).get("time_based", {}).get("train_period_end")
     if not validation_builder_end:
         raise ValueError("Feature dataset metadata is missing train split boundaries.")
 
     # This is the sole point where test rows are read. All selection is complete above.
+    _log(
+        "Accessing the temporal test split once for final evaluation.",
+        is_synthetic=is_synthetic,
+    )
     test_guard = TestSetAccessGuard(
-        lambda: frame.loc[
-            (frame["time_split"] == "test") & frame["target"].notna()
-        ].copy()
+        lambda: frame.loc[frame["time_split"] == "test"]
+        .loc[lambda rows: rows["target"].notna()]
+        .copy()
     )
     test = test_guard.evaluate_once()
+    _validate_labeled_split_summary(
+        "test",
+        test,
+        metadata["split_boundaries"]["time_based"]["test"],
+    )
     y_test = pd.to_numeric(test["target"], errors="raise").astype(int).to_numpy()
-    if int(y_test.sum()) < minimum_split_positives:
-        raise ValueError(
-            f"test split has {int(y_test.sum())} positives; at least "
-            f"{minimum_split_positives} are required."
-        )
+    _validate_split_positives(
+        "test",
+        test,
+        minimum_positives=minimum_split_positives,
+        require_both_classes=False,
+    )
     if is_synthetic and not test["is_synthetic"].map(
         lambda value: str(value).strip().casefold() == "true"
     ).all():
@@ -812,10 +1189,7 @@ def train_feature_dataset(
     for name, model in fitted_models.items():
         raw_test_scores = _probabilities(model, x_test)
         calibrator = validation_calibration[name]["calibrator"]
-        if calibrator is not None:
-            calibrated_test_scores = calibrator.predict(raw_test_scores)
-        else:
-            calibrated_test_scores = raw_test_scores
+        calibrated_test_scores = _apply_calibrator(calibrator, raw_test_scores)
         prediction_scores[name] = calibrated_test_scores
         val_calibrated = calibrated_validation_scores[name]
         calibration_report[name] = {
@@ -829,11 +1203,19 @@ def train_feature_dataset(
             "validation_calibration_curve": _calibration_curve(y_validation, val_calibrated),
         }
 
-    rule_scores = _rule_scores(test, metadata["frequency"])
+    rule_scores = _rule_scores(
+        test,
+        metadata["frequency"],
+        critical_limit=cover_thresholds[0],
+        moderate_limit=cover_thresholds[1],
+    )
     rule_operating_threshold = rule_threshold
     persistence = (
-        pd.to_numeric(test["historical_stockout_count"], errors="coerce").fillna(0).gt(0).to_numpy(dtype=float)
-        if "historical_stockout_count" in test else np.zeros(len(test), dtype=float)
+        pd.to_numeric(test["stockout_previous_period"], errors="coerce")
+        .fillna(-0.5)
+        .to_numpy(dtype=float)
+        if "stockout_previous_period" in test
+        else np.zeros(len(test), dtype=float)
     )
     rule_metrics = _metric_summary(y_test, rule_scores, rule_operating_threshold)
     rule_metrics["confidence_threshold_selection"] = rule_threshold_selection
@@ -842,12 +1224,18 @@ def train_feature_dataset(
     )
     rule_metrics["recall_at_fixed_precision"] = (
         rule_metrics["recall"]
-        if rule_threshold_selection["precision_target_attained"]
+        if (
+            threshold_objective == "precision"
+            and rule_threshold_selection["precision_target_attained"]
+        )
         else None
     )
     rule_metrics["fixed_precision_target"] = (
         precision_target
-        if rule_threshold_selection["precision_target_attained"]
+        if (
+            threshold_objective == "precision"
+            and rule_threshold_selection["precision_target_attained"]
+        )
         else None
     )
     rule_metrics["cluster_bootstrap_95_ci"] = _bootstrap_ci(
@@ -865,7 +1253,7 @@ def train_feature_dataset(
     }
     seasonal_column = "stockout_same_period_last_year"
     if seasonal_column in test:
-        seasonal_scores = pd.to_numeric(test[seasonal_column], errors="coerce").fillna(0).to_numpy(dtype=float)
+        seasonal_scores = pd.to_numeric(test[seasonal_column], errors="coerce").fillna(-0.5).to_numpy(dtype=float)
         test_metric_results["seasonal_naive"] = _metric_summary(y_test, seasonal_scores, 0.5)
         test_metric_results["seasonal_naive"]["cluster_bootstrap_95_ci"] = _bootstrap_ci(
             test, y=y_test, scores=seasonal_scores, threshold=0.5,
@@ -874,7 +1262,11 @@ def train_feature_dataset(
     else:
         test_metric_results["seasonal_naive"] = {
             "status": "not computed",
-            "reason": "Feature table has no same-period-last-year stock-out observation.",
+            "reason": (
+                "not computed: insufficient history for a monthly same-period-last-year baseline."
+                if metadata["frequency"] == "monthly"
+                else "not computed: insufficient daily history for a same-period-last-year baseline."
+            ),
         }
 
     for name, scores in prediction_scores.items():
@@ -890,52 +1282,87 @@ def train_feature_dataset(
             test, y=y_test, scores=scores, threshold=threshold,
             repetitions=bootstrap_repetitions, seed=seed,
         )
-        metrics["pr_auc_difference_vs_rule_ci"] = _cluster_bootstrap_pr_difference(
+        difference_interval = _cluster_bootstrap_pr_difference(
             test, y=y_test, scores=scores, baseline_scores=rule_scores,
             repetitions=bootstrap_repetitions, seed=seed + 1,
         )
+        metrics["pr_auc_difference_vs_rule_ci"] = difference_interval
+        metrics["pr_auc_difference_vs_rule_bootstrap_resamples"] = (
+            bootstrap_repetitions if difference_interval is not None else 0
+        )
+        if metrics["cluster_bootstrap_95_ci"]["reason"] is not None:
+            metrics["not_computed_reasons"]["cluster_bootstrap_95_ci"] = (
+                metrics["cluster_bootstrap_95_ci"]["reason"]
+            )
+        if difference_interval is None:
+            metrics["not_computed_reasons"]["pr_auc_difference_vs_rule_ci"] = (
+                "not computed: insufficient valid two-class facility-cluster resamples."
+            )
         metrics["recall_at_fixed_precision"] = (
             metrics["recall"]
-            if threshold_selection[name]["precision_target_attained"]
+            if (
+                threshold_objective == "precision"
+                and threshold_selection[name]["precision_target_attained"]
+            )
             else None
         )
         metrics["fixed_precision_target"] = (
             precision_target
-            if threshold_selection[name]["precision_target_attained"]
+            if (
+                threshold_objective == "precision"
+                and threshold_selection[name]["precision_target_attained"]
+            )
             else None
         )
         metrics["stockouts_caught_share"] = metrics["recall"]
         test_metric_results[name] = metrics
 
     selected_metrics = test_metric_results[chosen_model_name]
+    for model_name, metrics in test_metric_results.items():
+        if metrics.get("status") == "not computed":
+            continue
+        metric_scores = (
+            rule_scores if model_name == "rule_baseline"
+            else persistence if model_name == "persistence_baseline"
+            else seasonal_scores if model_name == "seasonal_naive" and seasonal_column in test
+            else prediction_scores.get(model_name)
+        )
+        metric_threshold = (
+            rule_operating_threshold if model_name == "rule_baseline"
+            else thresholds.get(model_name, 0.5)
+        )
+        if metric_scores is not None:
+            metrics["share_stockouts_flagged_at_least_one_period_ahead"] = (
+                _lead_time_summary(
+                    test,
+                    scores=metric_scores,
+                    threshold=metric_threshold,
+                    frequency=metadata["frequency"],
+                ).get("share_stockouts_flagged_at_least_one_period_ahead")
+            )
     group_train = frame.loc[
         (frame["group_split"] == "train")
         & (frame["time_split"] == "train")
-        & frame["target"].notna()
-    ].copy()
+    ]
+    group_train = group_train.loc[group_train["target"].notna()].copy()
     group_validation = frame.loc[
         (frame["group_split"] == "train")
         & (frame["time_split"] == "validation")
-        & frame["target"].notna()
-    ].copy()
-    group_test_summary = (
-        metadata["split_boundaries"].get("unseen_group", {}).get("test", {})
-    )
-    group_test_count = int(group_test_summary.get("positive_count", -1))
+    ]
+    group_validation = group_validation.loc[group_validation["target"].notna()].copy()
     group_test_guard = TestSetAccessGuard(
-        lambda: frame.loc[
-            (frame["group_split"] == "test") & frame["target"].notna()
-        ].copy()
+        lambda: frame.loc[frame["group_split"] == "test"]
+        .loc[lambda rows: rows["target"].notna()]
+        .copy()
     )
     unseen_recall: float | None = None
     group_result: dict[str, Any] = {
         "status": "not computed",
-        "test_rows": group_test_summary.get("row_count"),
+        "test_rows": None,
     }
     if (
         not group_train.empty
         and not group_validation.empty
-        and group_test_count >= minimum_split_positives
         and int(pd.to_numeric(group_train["target"]).sum()) >= minimum_split_positives
         and int(pd.to_numeric(group_validation["target"]).sum()) >= minimum_split_positives
     ):
@@ -946,32 +1373,52 @@ def train_feature_dataset(
             group_x_train, group_y_train, seed=seed,
         )
         group_val_scores = _probabilities(group_model, group_x_validation)
-        group_calibrator = None
-        if len(np.unique(group_y_validation)) > 1 and len(group_y_validation) >= 20:
-            group_calibrator = IsotonicRegression(out_of_bounds="clip").fit(
-                group_val_scores, group_y_validation
-            )
-            group_val_scores = group_calibrator.predict(group_val_scores)
-        group_threshold, group_threshold_detail = _threshold_for_precision(
-            group_y_validation, group_val_scores, precision_target
+        (
+            group_val_scores,
+            group_calibrator,
+            group_threshold,
+            group_threshold_detail,
+            _,
+        ) = _validation_policy(
+            group_y_validation,
+            group_val_scores,
+            operating_target,
+            threshold_objective=threshold_objective,
         )
         unseen_test = group_test_guard.evaluate_once()
-        if int(pd.to_numeric(unseen_test["target"]).sum()) < minimum_split_positives:
-            raise ValueError("Unseen-group test split has fewer positives than its metadata declares.")
-        group_x_test, group_y_test = _split_xy(unseen_test, features)
-        group_test_scores = _probabilities(group_model, group_x_test)
-        if group_calibrator is not None:
-            group_test_scores = group_calibrator.predict(group_test_scores)
-        group_metrics = _metric_summary(group_y_test, group_test_scores, group_threshold)
-        unseen_recall = group_metrics["recall"]
-        group_result = {
-            "status": "computed",
-            "model": chosen_model_name,
-            "metrics": group_metrics,
-            "threshold_selection": group_threshold_detail,
-            "groups": sorted(unseen_test["facility_id"].astype(str).unique().tolist()),
-            "test_access_count": group_test_guard.access_count,
-        }
+        group_test_summary = metadata["split_boundaries"]["unseen_group"]["test"]
+        _validate_labeled_split_summary(
+            "unseen-group test",
+            unseen_test,
+            group_test_summary,
+        )
+        group_result["test_rows"] = len(unseen_test)
+        group_test_positives = int(pd.to_numeric(unseen_test["target"]).sum())
+        if group_test_positives >= minimum_split_positives:
+            group_x_test, group_y_test = _split_xy(unseen_test, features)
+            group_test_scores = _probabilities(group_model, group_x_test)
+            group_test_scores = _apply_calibrator(group_calibrator, group_test_scores)
+            group_metrics = _metric_summary(group_y_test, group_test_scores, group_threshold)
+            unseen_recall = group_metrics["recall"]
+            group_result = {
+                "status": "computed",
+                "test_rows": len(unseen_test),
+                "model": chosen_model_name,
+                "metrics": group_metrics,
+                "threshold_selection": group_threshold_detail,
+                "groups": sorted(unseen_test["facility_id"].astype(str).unique().tolist()),
+                "test_access_count": group_test_guard.access_count,
+            }
+        else:
+            group_result.update(
+                {
+                    "reason": (
+                        f"Unseen-group test split has {group_test_positives} positives; "
+                        f"at least {minimum_split_positives} are required."
+                    ),
+                    "test_access_count": group_test_guard.access_count,
+                }
+            )
     else:
         group_result["reason"] = (
             "Grouped train, validation, and test partitions each require at least "
@@ -981,6 +1428,9 @@ def train_feature_dataset(
     gate = evaluate_promotion_gate(
         is_synthetic=is_synthetic,
         time_based_split=time_split_valid,
+        provenance_status=provenance_status,
+        dataset_hash=metadata.get("dataset_hash"),
+        verified_dataset_hash=verified_dataset_hash,
         test_metrics={
             "rule_baseline": test_metric_results["rule_baseline"],
             "selected_model": selected_metrics,
@@ -988,17 +1438,61 @@ def train_feature_dataset(
         gate_diagnostics={
             "unseen_recall": unseen_recall,
             "leakage_warnings": leakage_warnings,
+            "history_period_count": history_period_count,
+            "minimum_history_periods": required_history,
+            "positive_counts_per_split": {
+                name: int(pd.to_numeric(part["target"]).sum())
+                for name, part in split_frames.items()
+            } | {"test": int(y_test.sum())},
+            "minimum_positives_per_split": minimum_split_positives,
+            "distinct_facilities": distinct_facilities,
+            "minimum_facilities": minimum_facilities,
         },
     )
 
     lead_time = {
-        "status": "not computed",
-        "reason": "The feature table stores window labels but not the observed event date within each label window.",
-        "rule_baseline_stockouts_caught_share": test_metric_results["rule_baseline"]["recall"],
-        "selected_model_stockouts_caught_share": selected_metrics["recall"],
-        "mean_periods_early": None,
-        "median_periods_early": None,
+        "frequency": metadata["frequency"],
+        "unit": "months" if metadata["frequency"] == "monthly" else "days",
+        "rule_baseline": _lead_time_summary(
+            test,
+            scores=rule_scores,
+            threshold=rule_operating_threshold,
+            frequency=metadata["frequency"],
+        ),
+        "selected_model": _lead_time_summary(
+            test,
+            scores=prediction_scores[chosen_model_name],
+            threshold=thresholds[chosen_model_name],
+            frequency=metadata["frequency"],
+        ),
+        "note": (
+            "Monthly lead time is coarse by design; finer lead-time claims require daily data."
+            if metadata["frequency"] == "monthly"
+            else "Daily event offsets are measured in observed daily periods."
+        ),
     }
+    effective_sample_size = {
+        "all_labeled": {
+            "rows": int(frame["target"].notna().sum()),
+            "positives": int(pd.to_numeric(frame["target"], errors="coerce").fillna(0).sum()),
+            "distinct_facilities": int(frame.loc[frame["target"].notna(), "facility_id"].nunique()),
+        }
+    }
+    dataset_dates = pd.to_datetime(frame["date"])
+    dataset_date_range = {
+        "start": dataset_dates.min().date().isoformat(),
+        "end": dataset_dates.max().date().isoformat(),
+    }
+    for split_name, part in {
+        "train": train,
+        "validation": validation,
+        "test": test,
+    }.items():
+        effective_sample_size[split_name] = {
+            "labeled_rows": len(part),
+            "positives": int(pd.to_numeric(part["target"]).sum()),
+            "distinct_facilities": int(part["facility_id"].nunique()),
+        }
     model_version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex
     artifact_dir = _create_artifact_directory(model_root, model_version)
     training_dates = pd.to_datetime(train["date"])
@@ -1013,24 +1507,56 @@ def train_feature_dataset(
             "end": training_dates.max().date().isoformat(),
         },
         "data_hash": metadata["dataset_hash"],
+        "provenance_status": provenance_status,
+        "verification": verification,
+        "verified_dataset_hash": verified_dataset_hash,
         "feature_table_sha256": metadata["feature_table_sha256"],
         "feature_table_row_count": metadata["feature_table_row_count"],
         "row_count": metadata["row_count"],
         "feature_dataset_id": metadata["build_id"],
+        "source_dataset_id": metadata.get("dataset_id"),
         "feature_list": features,
-        "horizon_days": int(metadata["horizon"]),
+        "label_mode": metadata["label_mode"],
+        "split_boundaries": metadata["split_boundaries"],
+        "dataset_date_range": dataset_date_range,
+        "horizon_periods": int(metadata["horizon"]),
+        "horizon_days": int(metadata["horizon"]) if metadata["frequency"] == "daily" else None,
         "data_frequency": metadata["frequency"],
         "is_synthetic": is_synthetic,
         "threshold": thresholds[chosen_model_name],
+        "rule_cover_thresholds": {
+            "critical_below": cover_thresholds[0],
+            "moderate_through": cover_thresholds[1],
+            "unit": "days" if metadata["frequency"] == "daily" else "months",
+        },
         "threshold_selection": threshold_selection[chosen_model_name],
         "gate_results": gate,
         "promotion_diagnostics": {
             "unseen_recall": unseen_recall,
             "leakage_warnings": leakage_warnings,
+            "history_period_count": history_period_count,
+            "minimum_history_periods": required_history,
+            "positive_counts_per_split": {
+                name: int(pd.to_numeric(part["target"]).sum())
+                for name, part in split_frames.items()
+            } | {"test": int(y_test.sum())},
+            "minimum_positives_per_split": minimum_split_positives,
+            "distinct_facilities": distinct_facilities,
+            "minimum_facilities": minimum_facilities,
         },
         "selected_model": chosen_model_name,
-        "model_validated": bool(gate["model_validated"] and not is_synthetic),
-        "library_versions": {"python": platform.python_version(), "pandas": pd.__version__, "scikit_learn": sklearn.__version__},
+        "model_validated": bool(
+            gate["model_validated"]
+            and not is_synthetic
+            and provenance_status == "verified"
+            and verified_dataset_hash == metadata["dataset_hash"]
+        ),
+        "library_versions": {
+            "python": platform.python_version(),
+            "pandas": pd.__version__,
+            "numpy": np.__version__,
+            "scikit_learn": sklearn.__version__,
+        },
         "random_seed": seed,
         "git_commit": _git_commit(),
         "calibration": calibration_report[chosen_model_name],
@@ -1046,10 +1572,24 @@ def train_feature_dataset(
             "test_label_diagnostics_used_before_final_pass": False,
         },
         "validation_only_tuning": parameters,
+        "validation_thresholds": {
+            "models": thresholds,
+            "rule_baseline": rule_operating_threshold,
+            "target": operating_target,
+            "precision_target": operating_target if threshold_objective == "precision" else None,
+            "recall_target": operating_target if threshold_objective == "recall" else None,
+            "threshold_objective": threshold_objective,
+        },
+        "effective_sample_size": effective_sample_size,
+        "history_period_count": history_period_count,
+        "minimum_history_periods": required_history,
+        "minimum_split_positives": minimum_split_positives,
+        "distinct_facilities": distinct_facilities,
+        "minimum_facilities": minimum_facilities,
         "test_access_count": test_guard.access_count,
         "unseen_group": {
             "group_column": metadata.get("group_column"),
-            "test_rows": group_test_summary.get("row_count"),
+            "test_rows": group_result.get("test_rows"),
             "recall": unseen_recall,
             "status": "computed" if unseen_recall is not None else "not computed",
             "results": group_result,
@@ -1069,19 +1609,47 @@ def train_feature_dataset(
         "feature_builder_state": metadata_out["feature_builder_state"],
     }
     joblib.dump(artifact_payload, artifact_dir / "model.joblib")
+    joblib.dump(
+        artifact_payload["calibrators"],
+        artifact_dir / "calibrators.joblib",
+    )
+    (artifact_dir / "feature_builder_state.json").write_text(
+        json.dumps(
+            metadata_out["feature_builder_state"],
+            indent=2,
+            allow_nan=False,
+            default=_json_default,
+        ),
+        encoding="utf-8",
+    )
+    metadata_out["artifact_sha256"] = {
+        name: _sha256_file(artifact_dir / name)
+        for name in (
+            "model.joblib",
+            "calibrators.joblib",
+            "feature_builder_state.json",
+        )
+    }
     metadata_path = artifact_dir / "metadata.json"
     metadata_path.write_text(json.dumps(metadata_out, indent=2, allow_nan=False, default=_json_default), encoding="utf-8")
     report = {
         "notice": metadata_out["notice"],
         "is_synthetic": is_synthetic,
         "interpretation": (
-            "This run uses synthetic data designed to test signal recovery. It is not evidence of real-world performance."
+            "This run uses synthetic data designed to test signal recovery. It is not evidence of real-world performance. Results apply only to the facilities, items, and time range in this generated dataset."
             if is_synthetic else
-            "This is a single held-out evaluation under the recorded data and split design. It does not establish causal impact or deployment readiness."
+            "This is a single held-out evaluation under the recorded data and split design. Results apply only to the facilities, items, and time range in this dataset; they do not establish causal impact or deployment readiness."
         ),
+        "dataset_date_range": dataset_date_range,
+        "facility_count": distinct_facilities,
+        "item_count": int(frame["item_id"].nunique()),
         "test_metrics": test_metric_results,
         "calibration": calibration_report,
         "label_prevalence": metadata.get("label_prevalence"),
+        "effective_sample_size": effective_sample_size,
+        "split_boundaries": metadata.get("split_boundaries"),
+        "data_frequency": metadata["frequency"],
+        "horizon_periods": int(metadata["horizon"]),
         "feature_availability": metadata.get("feature_availability", {}),
         "source_missingness": metadata.get("source_missingness"),
         "lead_time": lead_time,
@@ -1216,26 +1784,54 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"Cannot serialize {type(value).__name__}")
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as artifact:
+        for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train and evaluate models on a Phase 3 feature dataset.")
+    parser = argparse.ArgumentParser(
+        description="Train and evaluate models on a Phase 3 feature dataset."
+    )
     parser.add_argument("feature_dataset_id", help="Unique build ID emitted by ml.build_dataset")
     parser.add_argument("--feature-root", type=Path, default=FEATURE_ROOT)
     parser.add_argument("--model-root", type=Path, default=MODEL_ROOT)
     parser.add_argument("--precision-target", type=float, default=0.5)
-    parser.add_argument("--minimum-positives", type=int, default=1)
-    parser.add_argument("--minimum-split-positives", type=int, default=5)
+    parser.add_argument("--threshold-objective", choices=("precision", "recall"), default="precision")
+    parser.add_argument("--threshold-target", "--recall-target", type=float)
+    parser.add_argument("--minimum-positives", "--minimum-split-positives", dest="minimum_split_positives", type=int)
     parser.add_argument("--minimum-group-positives", type=int, default=5)
+    parser.add_argument("--minimum-history-periods", type=int, default=24)
+    parser.add_argument("--minimum-facilities", type=int)
+    parser.add_argument("--daily-critical-days", type=float, default=7.0)
+    parser.add_argument("--daily-moderate-days", type=float, default=14.0)
+    parser.add_argument("--monthly-critical-cover", type=float, default=0.25)
+    parser.add_argument("--monthly-moderate-cover", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--bootstrap-repetitions", type=int, default=200)
+    parser.add_argument("--bootstrap-repetitions", type=int, default=1000)
     args = parser.parse_args()
     artifact = train_feature_dataset(
         args.feature_dataset_id,
         feature_root=args.feature_root,
         model_root=args.model_root,
         precision_target=args.precision_target,
-        minimum_positives=args.minimum_positives,
+        threshold_objective=args.threshold_objective,
+        threshold_target=args.threshold_target,
         minimum_split_positives=args.minimum_split_positives,
         minimum_group_positives=args.minimum_group_positives,
+        minimum_history_periods=args.minimum_history_periods,
+        minimum_facilities=args.minimum_facilities,
+        daily_cover_thresholds=(
+            args.daily_critical_days,
+            args.daily_moderate_days,
+        ),
+        monthly_cover_thresholds=(
+            args.monthly_critical_cover,
+            args.monthly_moderate_cover,
+        ),
         seed=args.seed,
         bootstrap_repetitions=args.bootstrap_repetitions,
     )

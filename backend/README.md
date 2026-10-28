@@ -12,7 +12,7 @@ From the repository root:
 
 API routes are under `/api/v1`. The development frontend uses `http://localhost:8000` as its API proxy target. Set `MEDIPREDICT_CORS_ORIGINS` only when browser clients on other origins need access. Inventory, consumption, and risk predictions currently use synthetic demonstration data; district indicators are unverified seed values.
 
-The current legacy model artifact is not accepted as validated: it lacks required time-based validation metadata. Assessments therefore use the explicitly labeled rule-based days-of-cover fallback, and confidence is not reported. Do not run the legacy training script or present its metrics as predictive performance.
+The current legacy model artifact is not accepted as validated: it lacks required time-based validation metadata and an artifact SHA-256. Assessments therefore use the explicitly labeled rule-based days-of-cover fallback, and confidence is not reported. Do not run the legacy training script or present its metrics as predictive performance.
 
 Uploads to `POST /api/v1/data/assess-csv` are assessed in memory and are not persisted to `DailyStockLog` or `Prediction`. They must include `is_synthetic` with `true` or `false`; provenance is not inferred. `POST /api/v1/data/validate-csv` only returns a structured validation report. `POST /api/v1/data/training-upload` is a distinct, admin-key-protected intake route that stores a validated dataset and metadata but does not train.
 

@@ -1,6 +1,43 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Literal
 
+ProvenanceStatus = Literal["synthetic", "uploaded_unverified", "verified"]
+
+
+class VerificationSummary(BaseModel):
+    source_id: str | None = None
+    source_name: str | None = None
+    verification_method: str | None = None
+    verified_by: str | None = None
+    verified_at: str | None = None
+    single_party: bool | None = None
+    identity_note: str | None = None
+
+
+class ProvenanceResponse(BaseModel):
+    dataset_id: str
+    provenance_status: ProvenanceStatus
+    verification: dict | None = None
+    verification_summary: VerificationSummary | None = None
+    warning: str | None = None
+
+
+class DatasetDetail(BaseModel):
+    dataset_id: str
+    sha256: str | None
+    row_count: int | None
+    date_range: dict[str, str | None]
+    data_frequency: Literal["daily", "monthly"] | None
+    is_synthetic: bool | None
+    data_source: Literal["uploaded"]
+    uploader: str | None = None
+    uploaded_at_utc: str | None = None
+    provenance_status: ProvenanceStatus
+    verification: dict | None = None
+    verification_summary: VerificationSummary | None = None
+    warning: str | None = None
+
+
 class Summary(BaseModel):
     facilities: int
     districts: int
@@ -13,6 +50,7 @@ class Summary(BaseModel):
     reporting_date: str
     data_source: str | None = None
     is_synthetic: bool | None = None
+    provenance_status: ProvenanceStatus = "uploaded_unverified"
 
 class RiskRecord(BaseModel):
     model_config = ConfigDict(protected_namespaces=("model_dump",))
@@ -38,6 +76,7 @@ class RiskRecord(BaseModel):
     under5_population: int
     poverty_rate: float
     malaria_prevalence: float
+    provenance_status: ProvenanceStatus = "uploaded_unverified"
 
 class UploadResult(BaseModel):
     model_config = ConfigDict(protected_namespaces=("model_dump",))
@@ -52,6 +91,7 @@ class UploadResult(BaseModel):
     model_validated: bool
     data_source: str
     is_synthetic: bool | None
+    provenance_status: ProvenanceStatus = "uploaded_unverified"
     confidence_note: str
     items: list[RiskRecord]
 
@@ -72,6 +112,7 @@ class CsvValidationReport(BaseModel):
     total_counts: dict[str, int | bool]
     date_range: dict[str, str | None]
     is_synthetic: bool | None
+    provenance_status: Literal["synthetic", "uploaded_unverified"]
 
 class CsvAssessmentItem(BaseModel):
     model_config = ConfigDict(protected_namespaces=("model_dump",))
@@ -94,6 +135,7 @@ class CsvAssessmentItem(BaseModel):
     model_validated: Literal[False]
     data_source: Literal["uploaded"]
     is_synthetic: bool
+    provenance_status: Literal["synthetic", "uploaded_unverified"]
     facility_type: str | None = None
     region: str | None = None
     reorder_level: float | None = None
@@ -113,6 +155,7 @@ class CsvAssessmentResult(BaseModel):
     model_validated: Literal[False]
     data_source: Literal["uploaded"]
     is_synthetic: bool | None
+    provenance_status: Literal["synthetic", "uploaded_unverified"]
     confidence_note: str
     validation: CsvValidationReport
     items: list[CsvAssessmentItem]
@@ -126,6 +169,8 @@ class TrainingUploadResult(BaseModel):
     is_synthetic: bool | None
     data_source: Literal["uploaded"]
     metadata_path: str
+    provenance_status: ProvenanceStatus
+    verification_summary: VerificationSummary | None = None
 
 class TransferCandidate(BaseModel):
     donor_facility: str
@@ -139,6 +184,7 @@ class TransferCandidate(BaseModel):
     recipient_lead_time_days: float
     data_source: str
     is_synthetic: bool
+    provenance_status: ProvenanceStatus = "uploaded_unverified"
 
 class StockAlert(BaseModel):
     alert_id: str
@@ -157,6 +203,7 @@ class StockAlert(BaseModel):
     risk_level: str
     data_source: str
     is_synthetic: bool
+    provenance_status: ProvenanceStatus = "uploaded_unverified"
     message: str
 
 class FeatureImportance(BaseModel):
@@ -164,6 +211,8 @@ class FeatureImportance(BaseModel):
     importance: float
 
 class TrustMetrics(BaseModel):
+    model_config = ConfigDict(protected_namespaces=("model_dump",))
+
     accuracy: float | None
     labels: list[str]
     precision: list[float]
@@ -171,3 +220,6 @@ class TrustMetrics(BaseModel):
     confusion_matrix: list[list[int]]
     feature_importances: list[FeatureImportance]
     source: str
+    provenance_status: ProvenanceStatus = "uploaded_unverified"
+    verification: dict | None = None
+    model_validated: bool = False

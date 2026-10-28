@@ -113,6 +113,12 @@ def build_stock_alerts(rows: list[dict[str, Any]]) -> list[StockAlert]:
                 risk_level=risk_level,
                 data_source=str(row["data_source"]),
                 is_synthetic=bool(row["is_synthetic"]),
+                provenance_status=str(
+                    row.get(
+                        "provenance_status",
+                        "synthetic" if row["is_synthetic"] else "uploaded_unverified",
+                    )
+                ),
                 message=message,
             )
         )

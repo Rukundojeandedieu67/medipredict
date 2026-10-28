@@ -44,6 +44,8 @@ def build_labels(
     data["label_status"] = "unobserved_window"
     data["label_window_start"] = pd.NaT
     data["label_window_end"] = pd.NaT
+    data["label_event_date"] = pd.NaT
+    data["label_event_offset"] = pd.Series(pd.NA, index=data.index, dtype="Int64")
 
     for _, group in data.groupby(["facility_id", "item_id"], sort=False):
         positions = group.index.to_list()
@@ -71,15 +73,23 @@ def build_labels(
                 continue
 
             valid_positions = [int(value) for value in future_positions if value is not None]
-            data.at[position, "target"] = int(
-                any(bool(data.at[value, "_stockout"]) for value in valid_positions)
-            )
+            event_positions = [
+                value for value in valid_positions if bool(data.at[value, "_stockout"])
+            ]
+            data.at[position, "target"] = int(bool(event_positions))
             data.at[position, "label_status"] = "observed"
             data.at[position, "label_window_end"] = data.at[valid_positions[-1], "date"]
+            if event_positions:
+                event_position = event_positions[0]
+                data.at[position, "label_event_date"] = data.at[event_position, "date"]
+                data.at[position, "label_event_offset"] = int(
+                    (data.at[event_position, "_period"] - current_period).n
+                )
 
     data = data.drop(columns=["_stockout", "_period"])
     data["label_window_start"] = pd.to_datetime(data["label_window_start"])
     data["label_window_end"] = pd.to_datetime(data["label_window_end"])
+    data["label_event_date"] = pd.to_datetime(data["label_event_date"])
     return indexed_by_observation(data)
 
 

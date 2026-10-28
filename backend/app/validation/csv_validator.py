@@ -374,10 +374,17 @@ def validate_inventory_csv(
     total_warnings = len(warnings)
     limit = settings.max_returned_issues
     valid = total_errors == 0
+    complete_synthetic_flags = len(parsed_synthetic) == len(frame)
+    synthetic_status = (
+        "synthetic"
+        if complete_synthetic_flags and all(parsed_synthetic)
+        else "uploaded_unverified"
+    )
     return {
         "valid": valid,
         "purpose": purpose,
         "data_frequency": settings.data_frequency,
+        "provenance_status": synthetic_status,
         "data_frequency": settings.data_frequency,
         "row_count": len(frame),
         "facility_item_count": pair_count,
@@ -397,7 +404,9 @@ def validate_inventory_csv(
         },
         "is_synthetic": (
             parsed_synthetic[0]
-            if parsed_synthetic and all(value == parsed_synthetic[0] for value in parsed_synthetic)
+            if complete_synthetic_flags
+            and parsed_synthetic
+            and all(value == parsed_synthetic[0] for value in parsed_synthetic)
             else None
         ),
     }

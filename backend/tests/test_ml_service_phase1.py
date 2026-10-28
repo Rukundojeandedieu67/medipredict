@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -89,6 +90,15 @@ def test_fallback_has_no_confidence_and_is_explicitly_rule_based(monkeypatch, tm
     assert result["estimated_stock_after_14_days"] == 0
     assert result["data_source"] == "synthetic"
     assert result["is_synthetic"] is True
+    assert result["provenance_status"] == "synthetic"
+
+
+def test_non_synthetic_serving_records_are_unverified_by_default(monkeypatch, tmp_path):
+    monkeypatch.setattr(ml_service.settings, "model_path", tmp_path / "missing.joblib")
+
+    result = ml_service.infer([_record(is_synthetic=False)])[0]
+
+    assert result["provenance_status"] == "uploaded_unverified"
 
 
 @pytest.mark.parametrize(
@@ -137,6 +147,39 @@ def test_unvalidated_artifact_is_rejected_and_fallback_used(
     ) in caplog.text
     assert ml_service.load_metrics()["accuracy"] is None
     assert "0.9875" not in json.dumps(ml_service.load_metrics())
+
+
+@pytest.mark.parametrize(
+    ("model_validated", "expected_hash", "warning"),
+    [
+        (False, "0" * 64, "model_validated is not true"),
+        (True, "0" * 64, "SHA-256 mismatch"),
+    ],
+)
+def test_model_artifact_requires_validation_and_matching_hash(
+    monkeypatch, tmp_path, caplog, model_validated, expected_hash, warning
+):
+    _set_artifact_paths(
+        monkeypatch,
+        tmp_path,
+        {
+            "time_based_split": True,
+            "test_metrics": {"pr_auc": 0.5, "roc_auc": 0.5},
+            "training_date_range": {"start": "2025-01-01", "end": "2025-12-31"},
+            "data_hash": "a" * 64,
+            "feature_list": ["stock_lag"],
+            "horizon_days": 7,
+            "is_synthetic": False,
+            "model_validated": model_validated,
+            "artifact_sha256": {"legacy-model.joblib": expected_hash},
+        },
+    )
+
+    with caplog.at_level(logging.WARNING, logger="backend.app.ml_service"):
+        assert ml_service.get_model_bundle() == (None, None)
+
+    assert warning in caplog.text
+    assert ml_service.infer([_record()])[0]["method"] == "rule_based_fallback"
 
 
 def test_upload_without_synthetic_column_returns_required_validation_message():
@@ -198,3 +241,110 @@ def test_metrics_api_withholds_legacy_accuracy(monkeypatch, tmp_path):
     assert response["accuracy"] is None
     assert "No validated model metrics" in response["source"]
     assert "0.9875" not in json.dumps(response)
+    assert response["provenance_status"] == "uploaded_unverified"
+    assert response["model_validated"] is False
+
+
+def test_model_loader_reports_live_provenance_and_downgrades_tampering(
+    monkeypatch, tmp_path
+):
+    from backend.app import provenance
+
+    dataset_id = "v1-20260101T000000Z-" + "b" * 32
+    uploads = tmp_path / "uploads"
+    dataset_dir = uploads / "v1" / dataset_id
+    dataset_dir.mkdir(parents=True)
+    content = (
+        "facility_id,item_id,date,stock_on_hand,units_consumed,units_received,is_synthetic\n"
+        "TEST-FAC-001,TEST-ITEM-001,0001-01-01,10,1,0,false\n"
+    ).encode()
+    digest = hashlib.sha256(content).hexdigest()
+    (dataset_dir / "data.csv").write_bytes(content)
+    (dataset_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "dataset_id": dataset_id,
+                "sha256": digest,
+                "is_synthetic": False,
+                "uploader_identity": "TEST-UPLOADER-001",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "approved_sources.json").write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "source_id": "TEST-SOURCE-001",
+                        "name": "TEST SOURCE",
+                        "organization": "TEST ORGANIZATION",
+                        "system": "TEST SYSTEM",
+                        "contact": "",
+                        "accepted_verification_methods": ["direct_export_from_system"],
+                        "notes": "",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(provenance, "ROOT", tmp_path)
+    verification = provenance.verify_dataset(
+        dataset_id,
+        uploads,
+        source_id="TEST-SOURCE-001",
+        verification_method="direct_export_from_system",
+        verification_reference="TEST-REF-001",
+        reporting_period_start="0001-01-01",
+        reporting_period_end="0001-01-01",
+        verified_by="TEST-VERIFIER-001",
+    )["verification"]
+    model_path = tmp_path / "test-model.joblib"
+    model_content = b"test model"
+    model_path.write_bytes(model_content)
+    metrics_path = tmp_path / "model-metadata.json"
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "artifact_sha256": {
+                    model_path.name: hashlib.sha256(model_content).hexdigest()
+                },
+                "time_based_split": True,
+                "test_metrics": {"pr_auc": 0.7, "roc_auc": 0.8},
+                "training_date_range": {"start": "0001-01-01", "end": "0001-01-01"},
+                "data_hash": digest,
+                "verified_dataset_hash": digest,
+                "source_dataset_id": dataset_id,
+                "provenance_status": "verified",
+                "verification": verification,
+                "feature_list": ["days_of_cover"],
+                "horizon_days": 14,
+                "is_synthetic": False,
+                "model_validated": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ml_service.settings, "uploads_path", uploads)
+    monkeypatch.setattr(ml_service.settings, "model_path", model_path)
+    monkeypatch.setattr(ml_service.settings, "metrics_path", metrics_path)
+    monkeypatch.setattr(ml_service.joblib, "load", lambda _: "TEST MODEL")
+    ml_service.get_model_bundle.cache_clear()
+
+    model, metadata = ml_service.get_model_bundle()
+    assert model == "TEST MODEL"
+    assert metadata["provenance_status"] == "verified"
+    assert metadata["model_validated"] is True
+
+    with (dataset_dir / "data.csv").open("ab") as destination:
+        destination.write(b"#changed\n")
+    ml_service.get_model_bundle.cache_clear()
+
+    _, changed_metadata = ml_service.get_model_bundle()
+    metrics = ml_service.load_metrics()
+    assert changed_metadata["provenance_status"] == "uploaded_unverified"
+    assert changed_metadata["model_validated"] is False
+    assert metrics["provenance_status"] == "uploaded_unverified"
+    assert metrics["model_validated"] is False

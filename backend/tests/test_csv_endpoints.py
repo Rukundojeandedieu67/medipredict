@@ -42,8 +42,18 @@ def test_assessment_endpoint_does_not_persist_upload(tmp_path, monkeypatch):
 
     assert result.records_received == 1
     assert result.data_source == "uploaded"
+    assert result.provenance_status == "uploaded_unverified"
+    assert result.items[0].provenance_status == "uploaded_unverified"
     assert result.items[0].method == "rule_based_fallback"
     assert not (tmp_path / "uploads").exists()
+
+
+def test_synthetic_assessment_uses_synthetic_status():
+    result = asyncio.run(main.assess_csv(_upload(_csv(synthetic="true"))))
+
+    assert result.provenance_status == "synthetic"
+    assert result.items[0].provenance_status == "synthetic"
+    assert result.validation.provenance_status == "synthetic"
 
 
 def test_legacy_upload_route_is_deprecated_assessment_alias(caplog):
@@ -82,6 +92,8 @@ def test_http_assess_and_validate_endpoints_return_contract_shapes(tmp_path, mon
     assessment_json = assessment.json()
     assert assessment_json["method"] == "rule_based_fallback"
     assert assessment_json["items"][0]["data_source"] == "uploaded"
+    assert assessment_json["provenance_status"] == "uploaded_unverified"
+    assert assessment_json["items"][0]["provenance_status"] == "uploaded_unverified"
     assert assessment_json["items"][0]["confidence"] is None
     assert validation.status_code == 200
     assert validation.json()["valid"] is True

@@ -1,12 +1,15 @@
 """Model loading, feature mapping, and stock risk inference."""
+import hashlib
 import json
 import logging
 import math
 from functools import lru_cache
+import re
 
 import joblib
 import pandas as pd
 from .config import settings
+from .provenance import ProvenanceError, resolve_provenance
 
 logger = logging.getLogger(__name__)
 REQUIRED_MODEL_METADATA = (
@@ -20,9 +23,72 @@ REQUIRED_MODEL_METADATA = (
 )
 
 
+def _model_artifact_hash_matches(metadata: dict) -> bool:
+    hashes = metadata.get("artifact_sha256")
+    expected_hash = hashes.get(settings.model_path.name) if isinstance(hashes, dict) else None
+    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        logger.warning(
+            "Model artifact rejected: SHA-256 is missing or invalid for %s",
+            settings.model_path.name,
+        )
+        return False
+
+    digest = hashlib.sha256()
+    try:
+        with settings.model_path.open("rb") as artifact:
+            for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        logger.warning("Model artifact rejected: could not read artifact for hashing: %s", exc)
+        return False
+
+    if digest.hexdigest() != expected_hash:
+        logger.warning(
+            "Model artifact rejected: SHA-256 mismatch for %s",
+            settings.model_path.name,
+        )
+        return False
+    return True
+
+
+def _resolve_model_provenance(metadata: dict) -> tuple[str, dict | None]:
+    if metadata.get("is_synthetic") is True:
+        return "synthetic", None
+    data_hash = metadata.get("data_hash")
+    verified_hash = metadata.get("verified_dataset_hash")
+    if (
+        metadata.get("provenance_status") != "verified"
+        or not isinstance(data_hash, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", data_hash)
+        or verified_hash != data_hash
+    ):
+        return "uploaded_unverified", None
+    dataset_id = metadata.get("source_dataset_id")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        logger.warning("Model provenance downgraded: source dataset ID is missing.")
+        return "uploaded_unverified", None
+    try:
+        provenance = resolve_provenance(dataset_id, settings.uploads_path)
+    except (FileNotFoundError, OSError, ProvenanceError) as exc:
+        logger.warning("Model provenance downgraded: source registry could not be checked: %s", exc)
+        return "uploaded_unverified", None
+    verification = provenance.get("verification")
+    if (
+        provenance.get("provenance_status") != "verified"
+        or not isinstance(verification, dict)
+        or verification.get("dataset_sha256") != data_hash
+    ):
+        logger.warning(
+            "Model provenance downgraded: current source dataset does not match model data hash."
+        )
+        return "uploaded_unverified", None
+    return "verified", verification
+
+
 @lru_cache(maxsize=1)
 def get_model_bundle() -> tuple[object | None, dict | None]:
     if not settings.model_path.exists():
+        logger.warning("Model artifact missing; using rule-based fallback")
         return None, None
 
     metadata: dict = {}
@@ -64,6 +130,17 @@ def get_model_bundle() -> tuple[object | None, dict | None]:
             ", ".join(invalid),
         )
         return None, None
+    if metadata.get("model_validated") is not True:
+        logger.warning("Model artifact rejected: model_validated is not true")
+        return None, None
+    if not _model_artifact_hash_matches(metadata):
+        return None, None
+    status, verification = _resolve_model_provenance(metadata)
+    metadata["provenance_status"] = status
+    metadata["verification"] = verification
+    metadata["model_validated"] = bool(
+        metadata.get("model_validated") is True and status == "verified"
+    )
     if metadata["is_synthetic"]:
         logger.warning(
             "Model artifact rejected; is_synthetic=true does not validate real-world performance"
@@ -186,11 +263,29 @@ def infer(records: list[dict], data_source: str | None = None) -> list[dict]:
             "model_validated": model_validated,
             "data_source": source,
             "is_synthetic": is_synthetic,
+            "provenance_status": (
+                "synthetic" if is_synthetic else "uploaded_unverified"
+            ),
             "confidence_note": confidence_note,
         })
     return assessed
 
 def load_metrics() -> dict:
+    provenance_status = "uploaded_unverified"
+    verification = None
+    model_validated = False
+    try:
+        metadata = json.loads(settings.metrics_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        metadata = {}
+    if isinstance(metadata, dict):
+        provenance_status, verification = _resolve_model_provenance(metadata)
+        model_validated = bool(
+            metadata.get("model_validated") is True
+            and provenance_status == "verified"
+            and settings.model_path.is_file()
+            and _model_artifact_hash_matches(metadata)
+        )
     return {
         "accuracy": None,
         "labels": [],
@@ -200,4 +295,7 @@ def load_metrics() -> dict:
         "feature_names": [],
         "feature_importances": [],
         "source": "No validated model metrics are available.",
+        "provenance_status": provenance_status,
+        "verification": verification,
+        "model_validated": model_validated,
     }

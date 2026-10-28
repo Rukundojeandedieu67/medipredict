@@ -1,3 +1,66 @@
+export type ProvenanceStatus = "synthetic" | "uploaded_unverified" | "verified";
+
+export interface VerificationBlock {
+  event: "verification";
+  source_id: string;
+  verification_method: string;
+  verification_reference: string;
+  reporting_period_start: string;
+  reporting_period_end: string;
+  dataset_id: string;
+  dataset_sha256: string;
+  verified_by: string | null;
+  verified_at: string;
+  single_party: boolean;
+  identity_note?: string | null;
+  evidence_file_sha256?: string;
+  source: {
+    source_id: string;
+    name: string | null;
+    organization: string | null;
+    system: string | null;
+  };
+}
+
+export interface VerificationSummary {
+  source_id: string | null;
+  source_name: string | null;
+  verification_method: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  single_party: boolean | null;
+  identity_note: string | null;
+}
+
+export interface DatasetProvenance {
+  dataset_id: string;
+  provenance_status: ProvenanceStatus;
+  verification: VerificationBlock | null;
+  verification_summary: VerificationSummary | null;
+  warning: string | null;
+}
+
+export interface DatasetDetail extends DatasetProvenance {
+  sha256: string | null;
+  row_count: number | null;
+  date_range: { start: string | null; end: string | null };
+  data_frequency: "daily" | "monthly" | null;
+  is_synthetic: boolean | null;
+  data_source: "uploaded";
+  uploader: string | null;
+  uploaded_at_utc: string | null;
+}
+
+export interface TrainingUploadResult extends DatasetProvenance {
+  sha256: string;
+  row_count: number;
+  date_range: { start: string | null; end: string | null };
+  data_frequency: "daily" | "monthly";
+  is_synthetic: boolean | null;
+  data_source: "uploaded";
+  metadata_path: string;
+}
+
 export interface Summary {
   facilities: number;
   districts: number;
@@ -10,6 +73,7 @@ export interface Summary {
   reporting_date: string;
   data_source: "real" | "synthetic" | "uploaded" | null;
   is_synthetic: boolean | null;
+  provenance_status: ProvenanceStatus;
 }
 
 export interface RiskRecord {
@@ -34,6 +98,8 @@ export interface RiskRecord {
   under5_population: number;
   poverty_rate: number;
   malaria_prevalence: number;
+  provenance_status: ProvenanceStatus;
+  verification?: VerificationBlock | null;
 }
 
 export interface TransferCandidate {
@@ -48,6 +114,7 @@ export interface TransferCandidate {
   recipient_lead_time_days: number;
   data_source: "real" | "synthetic" | "uploaded";
   is_synthetic: boolean;
+  provenance_status: ProvenanceStatus;
 }
 
 export interface FeatureImportance {
@@ -63,6 +130,9 @@ export interface TrustMetrics {
   confusion_matrix: number[][];
   feature_importances: FeatureImportance[];
   source: string;
+  provenance_status: ProvenanceStatus;
+  verification: VerificationBlock | null;
+  model_validated: boolean;
 }
 
 export interface UploadResult {
@@ -77,6 +147,7 @@ export interface UploadResult {
   model_validated: boolean;
   data_source: "real" | "synthetic" | "uploaded";
   is_synthetic: boolean | null;
+  provenance_status: "synthetic" | "uploaded_unverified";
   confidence_note: string;
   validation: CsvValidationReport;
   items: CsvAssessmentItem[];
@@ -99,6 +170,7 @@ export interface StockAlert {
   risk_level: string;
   data_source: "real" | "synthetic" | "uploaded";
   is_synthetic: boolean;
+  provenance_status: ProvenanceStatus;
   message: string;
 }
 
@@ -112,6 +184,7 @@ export interface ValidationIssue {
 export interface CsvValidationReport {
   valid: boolean;
   purpose: "assessment" | "training";
+  data_frequency: "daily" | "monthly";
   row_count: number;
   facility_item_count: number;
   errors: ValidationIssue[];
@@ -126,6 +199,7 @@ export interface CsvValidationReport {
   };
   date_range: { start: string | null; end: string | null };
   is_synthetic: boolean | null;
+  provenance_status: "synthetic" | "uploaded_unverified";
 }
 
 export interface CsvAssessmentItem {
@@ -147,6 +221,7 @@ export interface CsvAssessmentItem {
   model_validated: false;
   data_source: "uploaded";
   is_synthetic: boolean;
+  provenance_status: "synthetic" | "uploaded_unverified";
   facility_type: string | null;
   region: string | null;
   reorder_level: number | null;

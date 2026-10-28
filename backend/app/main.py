@@ -9,7 +9,7 @@ import io
 import uuid
 
 import pandas as pd
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,10 +24,18 @@ from .ml_service import (
     parse_is_synthetic,
     risk_from_lead_time,
 )
+from .provenance import (
+    ProvenanceError,
+    resolve_provenance,
+    revoke_verification,
+    verify_dataset,
+)
 from .schemas.api import (
     CsvAssessmentItem,
     CsvAssessmentResult,
     CsvValidationReport,
+    DatasetDetail,
+    ProvenanceResponse,
     StockAlert,
     Summary,
     RiskRecord,
@@ -64,18 +72,24 @@ def load_rows() -> list[dict]:
 @app.get("/api/v1/health")
 async def health(): return {"status": "ok", "service": settings.app_name}
 
-def provenance_summary(rows: list[dict]) -> tuple[str | None, bool | None]:
+def provenance_summary(
+    rows: list[dict],
+) -> tuple[str | None, bool | None, str]:
     if not rows:
-        return None, None
+        return None, None, "uploaded_unverified"
     flags = [bool(row["is_synthetic"]) for row in rows]
-    return ("synthetic" if any(flags) else "real"), any(flags)
+    return (
+        "synthetic" if any(flags) else "real",
+        any(flags),
+        "synthetic" if all(flags) else "uploaded_unverified",
+    )
 
 @app.get("/api/v1/inventory/summary", response_model=Summary)
 async def inventory_summary(db: Session = Depends(get_db)):
     rows = load_rows()
-    if not rows: return Summary(facilities=0,districts=0,medicines=0,critical=0,moderate=0,stable=0,unknown=0,stock_units=0,reporting_date="—",data_source=None,is_synthetic=None)
-    data_source, is_synthetic = provenance_summary(rows)
-    return Summary(facilities=len({r["facility"] for r in rows}), districts=len({r["district"] for r in rows}), medicines=len({r["medicine_code"] for r in rows}), critical=sum(r["risk_level"]=="CRITICAL" for r in rows), moderate=sum(r["risk_level"]=="MODERATE" for r in rows), stable=sum(r["risk_level"]=="STABLE" for r in rows), unknown=sum(r["risk_level"]=="UNKNOWN" for r in rows), stock_units=int(sum(r["stock_units"] for r in rows)), reporting_date=str(max(r["reporting_date"] for r in rows)),data_source=data_source,is_synthetic=is_synthetic)
+    if not rows: return Summary(facilities=0,districts=0,medicines=0,critical=0,moderate=0,stable=0,unknown=0,stock_units=0,reporting_date="—",data_source=None,is_synthetic=None,provenance_status="uploaded_unverified")
+    data_source, is_synthetic, provenance_status = provenance_summary(rows)
+    return Summary(facilities=len({r["facility"] for r in rows}), districts=len({r["district"] for r in rows}), medicines=len({r["medicine_code"] for r in rows}), critical=sum(r["risk_level"]=="CRITICAL" for r in rows), moderate=sum(r["risk_level"]=="MODERATE" for r in rows), stable=sum(r["risk_level"]=="STABLE" for r in rows), unknown=sum(r["risk_level"]=="UNKNOWN" for r in rows), stock_units=int(sum(r["stock_units"] for r in rows)), reporting_date=str(max(r["reporting_date"] for r in rows)),data_source=data_source,is_synthetic=is_synthetic, provenance_status=provenance_status)
 
 @app.get("/api/v1/predictions/risk-register", response_model=list[RiskRecord])
 async def risk_register(risk: str | None = Query(default=None), district: str | None = Query(default=None), search: str | None = Query(default=None), limit: int = Query(default=500, ge=1, le=5000)):
@@ -193,6 +207,7 @@ def _assessment_result(
                 model_validated=False,
                 data_source="uploaded",
                 is_synthetic=synthetic,
+                provenance_status="synthetic" if synthetic else "uploaded_unverified",
                 facility_type=row.get("facility_type") or None,
                 region=row.get("region") or None,
                 reorder_level=(
@@ -221,6 +236,9 @@ def _assessment_result(
         model_validated=False,
         data_source="uploaded",
         is_synthetic=next(iter(synthetic_values)) if len(synthetic_values) == 1 else None,
+        provenance_status=(
+            "synthetic" if synthetic_values == {True} else "uploaded_unverified"
+        ),
         confidence_note=confidence_note,
         validation=report,
         items=items,
@@ -284,6 +302,7 @@ async def training_upload(
         "dataset_id": dataset_id,
         "sha256": digest,
         "uploader": (x_uploader or "admin").strip()[:160],
+        "uploader_identity": (x_uploader or "").strip()[:160] or None,
         "uploaded_at_utc": datetime.now(timezone.utc).isoformat(),
         "row_count": report.row_count,
         "date_range": report.date_range,
@@ -305,7 +324,141 @@ async def training_upload(
         is_synthetic=synthetic,
         data_source="uploaded",
         metadata_path=metadata_path.relative_to(settings.uploads_path).as_posix(),
+        provenance_status=resolve_provenance(
+            dataset_id, settings.uploads_path
+        )["provenance_status"],
+        verification_summary=None,
     )
+
+
+def _dataset_response(dataset_id: str) -> DatasetDetail:
+    dataset_dir = settings.uploads_path / "v1" / dataset_id
+    metadata_path = dataset_dir / "metadata.json"
+    if not metadata_path.is_file():
+        raise HTTPException(404, "Dataset not found.")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        provenance = resolve_provenance(dataset_id, settings.uploads_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (OSError, json.JSONDecodeError, ProvenanceError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return DatasetDetail(
+        dataset_id=dataset_id,
+        sha256=metadata.get("sha256") or None,
+        row_count=metadata.get("row_count"),
+        date_range=metadata.get("date_range") or {"start": None, "end": None},
+        data_frequency=metadata.get("data_frequency"),
+        is_synthetic=metadata.get("is_synthetic"),
+        data_source="uploaded",
+        uploader=metadata.get("uploader") or None,
+        uploaded_at_utc=metadata.get("uploaded_at_utc") or None,
+        provenance_status=provenance["provenance_status"],
+        verification=provenance["verification"],
+        verification_summary=provenance["verification_summary"],
+        warning=provenance["warning"],
+    )
+
+
+def _provenance_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, FileNotFoundError):
+        return HTTPException(404, str(exc))
+    return HTTPException(422, str(exc))
+
+
+@app.get("/api/v1/data/datasets", response_model=list[DatasetDetail])
+async def list_datasets(
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+):
+    _require_admin(x_admin_api_key, operation="Dataset listing")
+    root = settings.uploads_path / "v1"
+    if not root.exists():
+        return []
+    return [
+        _dataset_response(directory.name)
+        for directory in sorted(root.iterdir())
+        if directory.is_dir()
+    ]
+
+
+@app.get("/api/v1/data/datasets/{dataset_id}/provenance", response_model=ProvenanceResponse)
+async def dataset_provenance(
+    dataset_id: str,
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+):
+    _require_admin(x_admin_api_key, operation="Dataset provenance")
+    try:
+        return resolve_provenance(dataset_id, settings.uploads_path)
+    except (FileNotFoundError, ProvenanceError) as exc:
+        raise _provenance_http_error(exc) from exc
+
+
+@app.get("/api/v1/data/datasets/{dataset_id}", response_model=DatasetDetail)
+async def dataset_detail(
+    dataset_id: str,
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+):
+    _require_admin(x_admin_api_key, operation="Dataset detail")
+    return _dataset_response(dataset_id)
+
+
+@app.post(
+    "/api/v1/data/datasets/{dataset_id}/verify",
+    response_model=ProvenanceResponse,
+)
+async def verify_uploaded_dataset(
+    dataset_id: str,
+    source_id: str = Form(...),
+    verification_method: str = Form(...),
+    verification_reference: str = Form(...),
+    reporting_period_start: str = Form(...),
+    reporting_period_end: str = Form(...),
+    evidence_file: UploadFile | None = File(default=None),
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    x_admin_identity: str | None = Header(default=None, alias="X-Admin-Identity"),
+):
+    _require_admin(x_admin_api_key, operation="Dataset verification")
+    evidence: bytes | None = None
+    if evidence_file is not None:
+        evidence = await evidence_file.read(MAX_CSV_BYTES + 1)
+        if len(evidence) > MAX_CSV_BYTES:
+            raise HTTPException(413, "Evidence file must be smaller than 20 MB.")
+    try:
+        return verify_dataset(
+            dataset_id,
+            settings.uploads_path,
+            source_id=source_id,
+            verification_method=verification_method,
+            verification_reference=verification_reference,
+            reporting_period_start=reporting_period_start,
+            reporting_period_end=reporting_period_end,
+            verified_by=x_admin_identity,
+            evidence_file=evidence,
+        )
+    except (FileNotFoundError, ProvenanceError) as exc:
+        raise _provenance_http_error(exc) from exc
+
+
+@app.post(
+    "/api/v1/data/datasets/{dataset_id}/revoke-verification",
+    response_model=ProvenanceResponse,
+)
+async def revoke_uploaded_dataset_verification(
+    dataset_id: str,
+    reason: str = Form(...),
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    x_admin_identity: str | None = Header(default=None, alias="X-Admin-Identity"),
+):
+    _require_admin(x_admin_api_key, operation="Verification revocation")
+    try:
+        return revoke_verification(
+            dataset_id,
+            settings.uploads_path,
+            reason=reason,
+            revoked_by=x_admin_identity,
+        )
+    except (FileNotFoundError, ProvenanceError) as exc:
+        raise _provenance_http_error(exc) from exc
 
 
 @app.post(
@@ -330,11 +483,11 @@ async def transfer_recommendations():
             units = max(0, int(min(donor["stock_units"] - donor["daily_consumption"]*30, recipient["daily_consumption"]*14-recipient["stock_units"])))
             if units:
                 is_synthetic = bool(donor["is_synthetic"] or recipient["is_synthetic"])
-                recommendations.append(TransferCandidate(donor_facility=donor["facility"],donor_district=donor["district"],recipient_facility=recipient["facility"],recipient_district=recipient["district"],medicine=recipient["medicine"],available_units=units,requested_units=units,donor_lead_time_days=donor["lead_time_days"],recipient_lead_time_days=recipient["lead_time_days"],data_source="synthetic" if is_synthetic else "real",is_synthetic=is_synthetic))
+                recommendations.append(TransferCandidate(donor_facility=donor["facility"],donor_district=donor["district"],recipient_facility=recipient["facility"],recipient_district=recipient["district"],medicine=recipient["medicine"],available_units=units,requested_units=units,donor_lead_time_days=donor["lead_time_days"],recipient_lead_time_days=recipient["lead_time_days"],data_source="synthetic" if is_synthetic else "real",is_synthetic=is_synthetic,provenance_status="synthetic" if is_synthetic else "uploaded_unverified"))
     return recommendations[:100]
 
 @app.get("/api/v1/analytics/trust-metrics", response_model=TrustMetrics)
 async def trust_metrics():
     metric = load_metrics()
     pairs = sorted(zip(metric.get("feature_names", []), metric.get("feature_importances", [])), key=lambda x: -x[1])[:12]
-    return TrustMetrics(accuracy=metric.get("accuracy",0),labels=metric.get("labels",[]),precision=metric.get("precision",[]),recall=metric.get("recall",[]),confusion_matrix=metric.get("confusion_matrix",[]),feature_importances=[{"feature":n,"importance":float(v)} for n,v in pairs],source=metric.get("source",""))
+    return TrustMetrics(accuracy=metric.get("accuracy"),labels=metric.get("labels",[]),precision=metric.get("precision",[]),recall=metric.get("recall",[]),confusion_matrix=metric.get("confusion_matrix",[]),feature_importances=[{"feature":n,"importance":float(v)} for n,v in pairs],source=metric.get("source",""),provenance_status=metric["provenance_status"],verification=metric["verification"],model_validated=metric["model_validated"])

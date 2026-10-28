@@ -56,10 +56,17 @@ The API-side frequency is configured with `MEDIPREDICT_DATA_FREQUENCY=daily|mont
 - `POST /api/v1/data/assess-csv` validates with assessment thresholds and returns a rule-based days-of-cover assessment for daily data only. Monthly data receives HTTP 422 rather than a misleading day-based estimate. It neither persists data nor trains.
 - `POST /api/v1/data/validate-csv?purpose=assessment|training` returns the validator report only.
 - `POST /api/v1/data/training-upload` requires `X-Admin-API-Key` and stores a strictly validated CSV under a unique versioned directory in `datasets/uploads/v1/`, with SHA-256 and JSON metadata. It does not train.
+- `GET /api/v1/data/datasets`, `GET /api/v1/data/datasets/{dataset_id}`, and `GET /api/v1/data/datasets/{dataset_id}/provenance` require the admin key and expose derived provenance.
+- `POST /api/v1/data/datasets/{dataset_id}/verify` requires the admin key and a source from `config/approved_sources.json`. Verification is an administrator's documented provenance claim, not an automatic consequence of validation or `is_synthetic=false`. Verification records and revocations append one JSON object per line to `verification.json`; the uploaded CSV and original `metadata.json` remain unchanged. An optional evidence upload is stored separately by content hash.
+- `POST /api/v1/data/datasets/{dataset_id}/revoke-verification` requires the admin key, appends the revocation reason and timestamp, and returns the derived unverified status.
 - Deprecated `POST /api/v1/data/upload-csv` is an alias for `/assess-csv`.
 - `MEDIPREDICT_ADMIN_API_KEY` configures the training-upload API key. Send it in `X-Admin-API-Key`; optionally identify the uploader with `X-Uploader`. Without the configured key, training upload is disabled.
 
 Assessment results use `data_source="uploaded"` because the ingest path is an upload. `is_synthetic` preserves the submitted declaration. Training-upload metadata uses the same ingest-path value and retains the supplied synthetic flag (or `null` when a dataset mixes true and false rows).
+
+Provenance status is derived and is never accepted from request data: `synthetic` for a dataset marked synthetic, `uploaded_unverified` for a non-synthetic file without a current valid verification record, and `verified` only when an authorized verification record matches the current stored-file SHA-256 and has not been revoked. A reporting period must cover the CSV's date range. If the stored-file hash changes, status falls back to `uploaded_unverified` and a warning is logged. The two-person check compares the stored uploader identity with the administrator identity supplied at verification; if either identity is unavailable, the response marks the verification `single_party`.
+
+The approved-source registry ships with no approved sources. Its entries must be confirmed with the data owner (e.g., RMS / RBC / MoH) before use. Current UI provenance badges distinguish `Synthetic`, `Uploaded (Unverified)`, and `Verified Source`; only the last state includes source and verification details.
 
 ## Label and split preparation
 

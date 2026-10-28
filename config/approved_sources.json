@@ -1,0 +1,13 @@
+{
+  "_note": "Entries must be confirmed with the data owner (e.g., RMS / RBC / MoH) before use.",
+  "_template": {
+    "source_id": "",
+    "name": "",
+    "organization": "",
+    "system": "",
+    "contact": "",
+    "accepted_verification_methods": [],
+    "notes": ""
+  },
+  "sources": []
+}

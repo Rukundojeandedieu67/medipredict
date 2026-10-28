@@ -1,0 +1,17 @@
+.git
+.datasets-git-history
+.venv
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.py[cod]
+**/*.db
+**/*.db-*
+**/.env
+**/dist
+.pytest_cache
+backups
+datasets
+ml/artifacts
+ml/models
+ml_engine/models_store

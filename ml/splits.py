@@ -13,6 +13,23 @@ def _periods(frame: pd.DataFrame, frequency: DataFrequency) -> pd.Series:
     return dates.dt.to_period("D" if frequency == "daily" else "M")
 
 
+def assign_time_splits(
+    frame: pd.DataFrame,
+    boundaries: dict[str, object],
+    *,
+    frequency: DataFrequency,
+) -> pd.Series:
+    """Assign rows by calendar boundaries without inspecting labels."""
+    periods = _periods(frame, frequency)
+    period_frequency = "D" if frequency == "daily" else "M"
+    assignments = pd.Series(None, index=frame.index, dtype=object)
+    for split_name in ("train", "validation", "test"):
+        start = pd.Period(str(boundaries[f"{split_name}_period_start"]), freq=period_frequency)
+        end = pd.Period(str(boundaries[f"{split_name}_period_end"]), freq=period_frequency)
+        assignments.loc[(periods >= start) & (periods <= end)] = split_name
+    return assignments
+
+
 def _summary(frame: pd.DataFrame) -> dict[str, object]:
     labeled = frame.loc[frame["target"].notna()]
     positives = int(labeled["target"].astype(int).sum()) if len(labeled) else 0
@@ -57,17 +74,24 @@ def time_based_split(
         raise ValueError("frame must contain target labels")
 
     periods = _periods(frame, frequency)
-    unique_periods = sorted(periods.unique())
-    first_boundary = int(len(unique_periods) * train_fraction)
-    second_boundary = int(len(unique_periods) * (train_fraction + validation_fraction))
-    if first_boundary <= horizon or second_boundary - first_boundary <= horizon or len(unique_periods) - second_boundary < 1:
+    observed_periods = sorted(periods.unique())
+    calendar_periods = list(
+        pd.period_range(
+            start=observed_periods[0],
+            end=observed_periods[-1],
+            freq="D" if frequency == "daily" else "M",
+        )
+    )
+    first_boundary = int(len(calendar_periods) * train_fraction)
+    second_boundary = int(len(calendar_periods) * (train_fraction + validation_fraction))
+    if first_boundary <= horizon or second_boundary - first_boundary <= horizon or len(calendar_periods) - second_boundary < 1:
         raise ValueError("Not enough time periods for requested splits and purge gaps.")
 
     train_end_index = first_boundary - horizon - 1
     validation_end_index = second_boundary - horizon - 1
-    train_periods = set(unique_periods[: train_end_index + 1])
-    validation_periods = set(unique_periods[first_boundary : validation_end_index + 1])
-    test_periods = set(unique_periods[second_boundary:])
+    train_periods = set(calendar_periods[: train_end_index + 1])
+    validation_periods = set(calendar_periods[first_boundary : validation_end_index + 1])
+    test_periods = set(calendar_periods[second_boundary:])
     split_frames = {
         "train": frame.loc[periods.isin(train_periods) & frame["target"].notna()].copy(),
         "validation": frame.loc[periods.isin(validation_periods) & frame["target"].notna()].copy(),
@@ -89,11 +113,11 @@ def time_based_split(
         "purge_gap_periods": horizon,
         "purged_before_validation": [
             period.start_time.date().isoformat()
-            for period in unique_periods[train_end_index + 1 : first_boundary]
+            for period in calendar_periods[train_end_index + 1 : first_boundary]
         ],
         "purged_before_test": [
             period.start_time.date().isoformat()
-            for period in unique_periods[validation_end_index + 1 : second_boundary]
+            for period in calendar_periods[validation_end_index + 1 : second_boundary]
         ],
         "frequency": frequency,
         "horizon": horizon,

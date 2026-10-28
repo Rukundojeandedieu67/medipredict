@@ -110,6 +110,7 @@ class FeatureBuilder:
         )
         self._fitted = False
         self._training_period_end: pd.Period | None = None
+        self._seasonal_features_enabled = False
         self._optional_columns: tuple[str, ...] = ()
         self._district_replenishment_supplied = False
         self.feature_list: list[str] = []
@@ -124,6 +125,10 @@ class FeatureBuilder:
             raise ValueError("FeatureBuilder.fit requires non-empty training rows")
         normalized = normalize_periods(train, self.frequency)
         self._training_period_end = normalized["_period"].max()
+        minimum_seasonal_periods = 24 if self.frequency == "monthly" else 365
+        self._seasonal_features_enabled = (
+            normalized["_period"].nunique() >= minimum_seasonal_periods
+        )
         self._optional_columns = tuple(
             column
             for column in OPTIONAL_ATTRIBUTES
@@ -143,7 +148,12 @@ class FeatureBuilder:
                 source = "units_received"
             elif name.startswith(("stock_to_", "days_of_cover", "months_of_stock")):
                 source = "stock_on_hand"
-            elif name.startswith(("historical_stockout", "periods_since_last_stockout")):
+            elif name.startswith((
+                "historical_stockout",
+                "periods_since_last_stockout",
+                "stockout_previous_period",
+                "stockout_same_period_last_year",
+            )):
                 source = "stock_on_hand, stockout_flag, stock_out_days"
             else:
                 source = name
@@ -165,6 +175,7 @@ class FeatureBuilder:
             "optional_columns": list(self._optional_columns),
             "district_replenishment_supplied": self._district_replenishment_supplied,
             "umuganda_rule_enabled": self.umuganda_rule_enabled,
+            "seasonal_features_enabled": self._seasonal_features_enabled,
             "feature_list": self.feature_list.copy(),
             "feature_availability": self.feature_availability.copy(),
             "feature_lineage": self.feature_lineage.copy(),
@@ -206,9 +217,8 @@ class FeatureBuilder:
                 "historical_stockout_count",
                 f"periods_since_last_stockout_{self.unit}",
                 f"historical_stockout_duration_mean_{self.unit}",
+                "stockout_previous_period",
                 f"reporting_completeness_{self.windows[-1]}_{self.unit}",
-                "month",
-                "rwanda_season",
                 "umuganda_week",
                 "national_commemoration_period",
                 f"public_holiday_count_next_{self.horizon}_{self.unit}",
@@ -218,6 +228,12 @@ class FeatureBuilder:
         )
         if self.frequency == "daily":
             names.append("week_of_year")
+        if self.frequency == "daily":
+            names.extend(("month", "rwanda_season"))
+        if self._seasonal_features_enabled:
+            names.append("stockout_same_period_last_year")
+            if self.frequency == "monthly":
+                names.extend(("month", "rwanda_season"))
         names.extend(OPTIONAL_ATTRIBUTES)
         return names
 
@@ -410,11 +426,30 @@ class FeatureBuilder:
             row[f"historical_stockout_duration_mean_{self.unit}"] = (
                 duration_sum / duration_count if duration_count else 0.0
             )
+            previous_period_index = period_map.get(
+                period - 1 if self.frequency == "monthly" else period - 1
+            )
+            row["stockout_previous_period"] = (
+                bool(stockouts[previous_period_index])
+                if previous_period_index is not None
+                else float("nan")
+            )
             row[f"reporting_completeness_{long_suffix}"] = (
                 sum(value in period_map for value in _window_periods(period, long_window)) / long_window
             )
-            row["month"] = current_date.month
-            row["rwanda_season"] = _season(current_date.month, self._calendar)
+            if self.frequency == "daily" or self._seasonal_features_enabled:
+                row["month"] = current_date.month
+                row["rwanda_season"] = _season(current_date.month, self._calendar)
+            if self._seasonal_features_enabled:
+                previous_year_period = (
+                    period - 12 if self.frequency == "monthly" else period - 365
+                )
+                previous_year_index = period_map.get(previous_year_period)
+                row["stockout_same_period_last_year"] = (
+                    bool(stockouts[previous_year_index])
+                    if previous_year_index is not None
+                    else float("nan")
+                )
             if self.frequency == "daily":
                 row["week_of_year"] = current_date.isocalendar().week
             row["umuganda_week"] = self._calendar_period_flag(
@@ -427,7 +462,11 @@ class FeatureBuilder:
                     current_date.month,
                     last_day - ((date(current_date.year, current_date.month, last_day).weekday() - 5) % 7),
                 )
-                row["umuganda_week"] = current_date == last_saturday
+                row["umuganda_week"] = (
+                    current_date == last_saturday
+                    if self.frequency == "daily"
+                    else last_saturday <= current_date
+                )
             row["national_commemoration_period"] = self._calendar_period_flag(
                 period,
                 current_date,

@@ -1,0 +1,100 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      MEDIPREDICT_DATABASE_URL: sqlite:////data/medipredict.db
+      MEDIPREDICT_CSV_PATH: /app/datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv
+      MEDIPREDICT_MODEL_PATH: /app/ml/models/${MODEL_VERSION:-unpromoted}/model.joblib
+      MEDIPREDICT_METRICS_PATH: /app/ml/models/${MODEL_VERSION:-unpromoted}/metadata.json
+      MEDIPREDICT_UPLOADS_PATH: /data/uploads
+      MEDIPREDICT_ADMIN_API_KEY: ${MEDIPREDICT_ADMIN_API_KEY:-}
+      MEDIPREDICT_CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-8080}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - api_data:/data
+      - ml_models:/app/ml/models:ro
+      - ./datasets/medipredict_data:/app/datasets/medipredict_data:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  feature-build:
+    profiles: ["ml"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      FEATURE_DATASET_ID: ${FEATURE_DATASET_ID:-}
+      MEDIPREDICT_UPLOADS_PATH: /data/uploads
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ -z "$$FEATURE_DATASET_ID" ]; then
+          echo "Set FEATURE_DATASET_ID to the ID returned by /api/v1/data/training-upload." >&2
+          exit 2
+        fi
+        exec python -m ml.build_dataset "$$FEATURE_DATASET_ID" \
+          --output-root /app/ml/artifacts/feature_tables
+    volumes:
+      - api_data:/data:ro
+      - ml_artifacts:/app/ml/artifacts
+    restart: "no"
+
+  training:
+    profiles: ["ml"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      FEATURE_BUILD_ID: ${FEATURE_BUILD_ID:-}
+      MEDIPREDICT_UPLOADS_PATH: /data/uploads
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ -z "$$FEATURE_BUILD_ID" ]; then
+          echo "Set FEATURE_BUILD_ID to the feature build ID emitted by ml.build_dataset." >&2
+          exit 2
+        fi
+        exec python -m ml.train "$$FEATURE_BUILD_ID" \
+          --feature-root /app/ml/artifacts/feature_tables \
+          --model-root /app/ml/models
+    volumes:
+      - api_data:/data:ro
+      - ml_artifacts:/app/ml/artifacts:ro
+      - ml_models:/app/ml/models
+    restart: "no"
+
+volumes:
+  api_data:
+  ml_artifacts:
+  ml_models:
