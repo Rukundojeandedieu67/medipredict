@@ -1,5 +1,6 @@
-from datetime import datetime
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from datetime import datetime, timezone
+from typing import Any
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..database import Base
 
@@ -58,3 +59,57 @@ class AlertNotificationState(Base):
     sms_severity: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sms_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DatasetRecord(Base):
+    __tablename__ = "datasets"
+
+    dataset_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    object_key: Mapped[str] = mapped_column(String(1024), unique=True)
+    storage_backend: Mapped[str] = mapped_column(String(20))
+    byte_size: Mapped[int] = mapped_column(Integer)
+    row_count: Mapped[int] = mapped_column(Integer)
+    date_start: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    date_end: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    data_frequency: Mapped[str] = mapped_column(String(12))
+    is_synthetic: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    data_source: Mapped[str] = mapped_column(String(80))
+    uploader: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
+class DatasetEvent(Base):
+    __tablename__ = "dataset_events"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.dataset_id"), index=True)
+    dataset_sha256: Mapped[str] = mapped_column(String(64))
+    event_type: Mapped[str] = mapped_column(String(24))
+    actor_subject: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    details: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
+class ModelRelease(Base):
+    __tablename__ = "model_releases"
+
+    model_version: Mapped[str] = mapped_column(String(80), primary_key=True)
+    source_dataset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("datasets.dataset_id"), nullable=True, index=True
+    )
+    source_dataset_sha256: Mapped[str] = mapped_column(String(64))
+    artifact_key: Mapped[str] = mapped_column(String(1024), unique=True)
+    model_sha256: Mapped[str] = mapped_column(String(64))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    is_synthetic: Mapped[bool] = mapped_column(Boolean)
+    model_validated: Mapped[bool] = mapped_column(Boolean)
+    release_status: Mapped[str] = mapped_column(String(20), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

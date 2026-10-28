@@ -16,12 +16,20 @@ def upgrade() -> None:
     for table in ("daily_stock_logs", "predictions"):
         op.add_column(table, sa.Column("is_synthetic", sa.Boolean(), nullable=True))
         op.add_column(table, sa.Column("data_source", sa.String(length=32), nullable=True))
+        provenance_table = sa.table(
+            table,
+            sa.column("is_synthetic", sa.Boolean()),
+            sa.column("data_source", sa.String(length=32)),
+        )
         op.execute(
-            sa.text(
-                f"UPDATE {table} "
-                "SET is_synthetic = 1, data_source = 'synthetic' "
-                "WHERE is_synthetic IS NULL OR data_source IS NULL"
+            sa.update(provenance_table)
+            .where(
+                sa.or_(
+                    provenance_table.c.is_synthetic.is_(None),
+                    provenance_table.c.data_source.is_(None),
+                )
             )
+            .values(is_synthetic=True, data_source="synthetic")
         )
 
 

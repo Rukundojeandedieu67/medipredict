@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     app_name: str = "MediPredict Rwanda"
     database_url: str = f"sqlite:///{(ROOT / 'backend' / 'medipredict.db').as_posix()}"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    storage_backend: Literal["local", "s3"] = "local"
+    object_store_bucket: str | None = None
+    object_store_endpoint_url: str | None = None
+    object_store_region: str = "auto"
+    object_store_access_key_id: str | None = None
+    object_store_secret_access_key: str | None = None
+    dashboard_data_key: str | None = None
     model_path: Path = ROOT / "ml_engine/models_store/medipredict_rf_model.pkl"
     metrics_path: Path = ROOT / "ml_engine/models_store/medipredict_metrics.json"
     csv_path: Path = ROOT / "datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv"
@@ -44,6 +51,13 @@ class Settings(BaseSettings):
     @classmethod
     def resolve_relative_sqlite_urls(cls, value: str) -> str:
         url = make_url(value)
+        if url.get_backend_name() in {"postgres", "postgresql"} and url.drivername in {
+            "postgres",
+            "postgresql",
+        }:
+            return url.set(drivername="postgresql+psycopg").render_as_string(
+                hide_password=False
+            )
         if url.get_backend_name() != "sqlite" or not url.database:
             return value
         database_path = Path(url.database).expanduser()

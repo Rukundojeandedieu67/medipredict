@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     environment:
       MEDIPREDICT_DATABASE_URL: sqlite:////data/medipredict.db
+      PORT: 8000
       MEDIPREDICT_CSV_PATH: /app/datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv
       MEDIPREDICT_MODEL_PATH: /app/ml/models/${MODEL_VERSION:-unpromoted}/model.joblib
       MEDIPREDICT_METRICS_PATH: /app/ml/models/${MODEL_VERSION:-unpromoted}/metadata.json
@@ -92,6 +93,18 @@ services:
       - api_data:/data:ro
       - ml_artifacts:/app/ml/artifacts:ro
       - ml_models:/app/ml/models
+    restart: "no"
+
+  database-migrate:
+    profiles: ["deploy"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      MEDIPREDICT_DATABASE_URL: ${MEDIPREDICT_DATABASE_URL:-sqlite:////data/medipredict.db}
+    command: ["alembic", "-c", "backend/alembic.ini", "upgrade", "head"]
+    volumes:
+      - api_data:/data
     restart: "no"
 
 volumes:

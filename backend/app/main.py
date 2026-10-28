@@ -30,6 +30,7 @@ from .provenance import (
     revoke_verification,
     verify_dataset,
 )
+from .storage import ObjectStorageError, StorageConfigurationError, read_dashboard_csv
 from .schemas.api import (
     CsvAssessmentItem,
     CsvAssessmentResult,
@@ -50,14 +51,23 @@ MAX_CSV_BYTES = 20 * 1024 * 1024
 CSV_COLUMNS = {"facility_name": "facility", "district": "district", "province": "province", "facility_type": "facility_type", "medicine_code": "medicine_code", "medicine_name": "medicine", "end_of_month_stock_units": "stock_units", "avg_daily_consumption_units": "daily_consumption", "nisr_under_5_population": "under5_population", "nisr_poverty_rate_pct": "poverty_rate", "nisr_malaria_prevalence_pct": "malaria_prevalence", "rainy_season_active": "rainy_season", "reporting_month": "reporting_date"}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    if engine.dialect.name == "sqlite":
+        Base.metadata.create_all(bind=engine)
     yield
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 def load_rows() -> list[dict]:
-    if not settings.csv_path.exists(): return []
-    df = pd.read_csv(settings.csv_path)
+    try:
+        content = read_dashboard_csv()
+    except (ObjectStorageError, StorageConfigurationError) as exc:
+        logger.exception("Could not load dashboard data.")
+        raise HTTPException(
+            status_code=503,
+            detail="Dashboard data is not available from configured storage.",
+        ) from exc
+    if content is None: return []
+    df = pd.read_csv(io.BytesIO(content))
     if "is_synthetic" not in df.columns:
         raise RuntimeError("Operational CSV is missing required provenance column: is_synthetic")
     try:

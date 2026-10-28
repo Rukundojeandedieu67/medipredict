@@ -62,6 +62,26 @@ def test_provenance_migration_backfills_and_downgrades_without_losing_rows(tmp_p
             "SELECT name FROM sqlite_master WHERE type='table' AND name='alert_notification_states'"
         ).fetchone()
         assert alert_table is not None
+        registry_tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert {"datasets", "dataset_events", "model_releases"}.issubset(
+            registry_tables
+        )
+        dataset_columns = {
+            column[1]
+            for column in connection.execute("PRAGMA table_info(datasets)").fetchall()
+        }
+        assert {
+            "dataset_id",
+            "sha256",
+            "object_key",
+            "metadata_json",
+            "is_synthetic",
+        }.issubset(dataset_columns)
 
     command.downgrade(copy_config, "0001_baseline")
     with sqlite3.connect(database_copy) as connection:
@@ -76,3 +96,8 @@ def test_provenance_migration_backfills_and_downgrades_without_losing_rows(tmp_p
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='alert_notification_states'"
         ).fetchone() is None
+        for table in ("datasets", "dataset_events", "model_releases"):
+            assert connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone() is None
