@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 import hashlib
 import hmac
@@ -6,6 +6,7 @@ import json
 import logging
 from pathlib import Path
 import io
+import tempfile
 import uuid
 
 import pandas as pd
@@ -30,7 +31,14 @@ from .provenance import (
     revoke_verification,
     verify_dataset,
 )
-from .storage import ObjectStorageError, StorageConfigurationError, read_dashboard_csv
+from .storage import (
+    ObjectStorageError,
+    StorageConfigurationError,
+    delete_object,
+    read_dashboard_csv,
+    read_object,
+    write_object,
+)
 from .schemas.api import (
     CsvAssessmentItem,
     CsvAssessmentResult,
@@ -139,7 +147,7 @@ async def _read_csv(file: UploadFile) -> tuple[bytes, pd.DataFrame]:
     if not file.filename or Path(file.filename).suffix.casefold() != ".csv":
         raise HTTPException(400, "Upload a .csv file")
     try:
-        content = await file.read()
+        content = await file.read(MAX_CSV_BYTES + 1)
         if len(content) > MAX_CSV_BYTES:
             raise HTTPException(413, "CSV must be smaller than 20 MB")
         frame = pd.read_csv(
@@ -286,11 +294,118 @@ def _require_admin(api_key: str | None, *, operation: str = "Training upload") -
         raise HTTPException(403, "Admin API key is missing or invalid.")
 
 
+def _dataset_object_key(dataset_id: str) -> str:
+    return f"v1/{dataset_id}/data.csv"
+
+
+def _store_dataset_event(
+    db: Session,
+    *,
+    dataset_id: str,
+    dataset_sha256: str,
+    event_type: str,
+    actor_subject: str | None,
+    details: dict,
+) -> None:
+    db.add(
+        models.DatasetEvent(
+            event_id=str(uuid.uuid4()),
+            dataset_id=dataset_id,
+            dataset_sha256=dataset_sha256,
+            event_type=event_type,
+            actor_subject=actor_subject,
+            details=details,
+        )
+    )
+
+
+def _dataset_record(dataset_id: str, db: Session) -> models.DatasetRecord | None:
+    return db.get(models.DatasetRecord, dataset_id)
+
+
+@contextmanager
+def _dataset_workspace(record: models.DatasetRecord, db: Session):
+    """Materialize a bounded, temporary compatibility workspace for provenance checks."""
+    temporary_directory = tempfile.TemporaryDirectory(prefix="medipredict-dataset-")
+    root = Path(temporary_directory.name)
+    dataset_dir = root / "v1" / record.dataset_id
+    dataset_dir.mkdir(parents=True)
+    try:
+        content = read_object(
+            record.object_key,
+            max_bytes=MAX_CSV_BYTES,
+            backend=record.storage_backend,
+        )
+        data_path = dataset_dir / "data.csv"
+        data_path.write_bytes(content)
+        metadata = dict(record.metadata_json)
+        metadata.update(
+            dataset_id=record.dataset_id,
+            sha256=record.sha256,
+            uploaded_at_utc=record.uploaded_at.isoformat()
+            if record.uploaded_at
+            else None,
+        )
+        (dataset_dir / "metadata.json").write_text(
+            json.dumps(metadata), encoding="utf-8"
+        )
+
+        events = db.scalars(
+            select(models.DatasetEvent)
+            .where(models.DatasetEvent.dataset_id == record.dataset_id)
+            .order_by(models.DatasetEvent.occurred_at, models.DatasetEvent.event_id)
+        ).all()
+        history = []
+        for event in events:
+            if event.event_type not in {"verification", "revocation"}:
+                continue
+            details = dict(event.details)
+            evidence_key = details.get("evidence_object_key")
+            evidence_hash = details.get("evidence_file_sha256")
+            if evidence_key and evidence_hash:
+                evidence = read_object(
+                    evidence_key,
+                    max_bytes=MAX_CSV_BYTES,
+                    backend=details.get("evidence_storage_backend", record.storage_backend),
+                )
+                if hashlib.sha256(evidence).hexdigest() != evidence_hash:
+                    raise ObjectStorageError("Stored verification evidence failed its checksum.")
+                evidence_dir = dataset_dir / "evidence"
+                evidence_dir.mkdir(exist_ok=True)
+                (evidence_dir / evidence_hash).write_bytes(evidence)
+            history.append(details)
+        if history:
+            (dataset_dir / "verification.json").write_text(
+                "".join(
+                    json.dumps(item, sort_keys=True, separators=(",", ":")) + "\n"
+                    for item in history
+                ),
+                encoding="utf-8",
+            )
+        yield root
+    finally:
+        temporary_directory.cleanup()
+
+
+def _resolve_stored_provenance(
+    record: models.DatasetRecord, db: Session
+) -> dict:
+    try:
+        with _dataset_workspace(record, db) as workspace:
+            return resolve_provenance(record.dataset_id, workspace)
+    except (ObjectStorageError, StorageConfigurationError) as exc:
+        logger.exception("Could not read dataset %s from storage.", record.dataset_id)
+        raise HTTPException(
+            503, "Dataset files are unavailable from configured storage."
+        ) from exc
+
+
 @app.post("/api/v1/data/training-upload", response_model=TrainingUploadResult)
 async def training_upload(
     file: UploadFile = File(...),
     x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
     x_uploader: str | None = Header(default=None, alias="X-Uploader"),
+    db: Session = Depends(get_db),
 ):
     _require_admin(x_admin_api_key)
     content, frame = await _read_csv(file)
@@ -302,28 +417,75 @@ async def training_upload(
         )
 
     dataset_id = f"v1-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex}"
-    dataset_dir = settings.uploads_path / "v1" / dataset_id
-    dataset_dir.mkdir(parents=True, exist_ok=False)
-    data_path = dataset_dir / "data.csv"
-    metadata_path = dataset_dir / "metadata.json"
     digest = hashlib.sha256(content).hexdigest()
     synthetic = report.is_synthetic
+    uploaded_at = datetime.now(timezone.utc)
+    uploader = (x_uploader or "admin").strip()[:160]
+    uploader_identity = (x_uploader or "").strip()[:160] or None
+    object_key = _dataset_object_key(dataset_id)
     metadata = {
         "dataset_id": dataset_id,
         "sha256": digest,
-        "uploader": (x_uploader or "admin").strip()[:160],
-        "uploader_identity": (x_uploader or "").strip()[:160] or None,
-        "uploaded_at_utc": datetime.now(timezone.utc).isoformat(),
+        "uploader": uploader,
+        "uploader_identity": uploader_identity,
+        "uploaded_at_utc": uploaded_at.isoformat(),
         "row_count": report.row_count,
         "date_range": report.date_range,
         "data_frequency": report.data_frequency,
         "is_synthetic": synthetic,
         "data_source": "uploaded",
     }
-    with data_path.open("xb") as destination:
-        destination.write(content)
-    with metadata_path.open("x", encoding="utf-8") as destination:
-        json.dump(metadata, destination, indent=2)
+    record = models.DatasetRecord(
+        dataset_id=dataset_id,
+        sha256=digest,
+        object_key=object_key,
+        storage_backend=settings.storage_backend,
+        byte_size=len(content),
+        row_count=report.row_count,
+        date_start=report.date_range.get("start"),
+        date_end=report.date_range.get("end"),
+        data_frequency=report.data_frequency,
+        is_synthetic=synthetic,
+        data_source="uploaded",
+        uploader=uploader,
+        uploaded_at=uploaded_at,
+        metadata_json=metadata,
+    )
+    metadata_path: Path | None = None
+    try:
+        write_object(object_key, content)
+        if settings.storage_backend == "local":
+            metadata_path = settings.uploads_path / "v1" / dataset_id / "metadata.json"
+            metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        db.add(record)
+        _store_dataset_event(
+            db,
+            dataset_id=dataset_id,
+            dataset_sha256=digest,
+            event_type="upload",
+            actor_subject=uploader_identity,
+            details={"byte_size": len(content), "row_count": report.row_count},
+        )
+        db.commit()
+    except (ObjectStorageError, StorageConfigurationError) as exc:
+        db.rollback()
+        logger.exception("Could not store uploaded dataset.")
+        raise HTTPException(
+            503, "Dataset could not be saved to configured storage."
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        try:
+            delete_object(object_key)
+        except (ObjectStorageError, StorageConfigurationError):
+            logger.exception("Failed to remove an unregistered dataset object.")
+        if metadata_path is not None:
+            try:
+                metadata_path.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("Failed to remove unregistered local dataset metadata.")
+        logger.exception("Could not register uploaded dataset.")
+        raise HTTPException(503, "Dataset metadata could not be saved.") from exc
 
     return TrainingUploadResult(
         dataset_id=dataset_id,
@@ -333,15 +495,45 @@ async def training_upload(
         data_frequency=report.data_frequency,
         is_synthetic=synthetic,
         data_source="uploaded",
-        metadata_path=metadata_path.relative_to(settings.uploads_path).as_posix(),
-        provenance_status=resolve_provenance(
-            dataset_id, settings.uploads_path
-        )["provenance_status"],
+        metadata_path=(
+            f"database://datasets/{dataset_id}"
+            if settings.storage_backend == "s3"
+            else (settings.uploads_path / "v1" / dataset_id / "metadata.json")
+            .relative_to(settings.uploads_path)
+            .as_posix()
+        ),
+        provenance_status=_resolve_stored_provenance(record, db)["provenance_status"],
         verification_summary=None,
     )
 
 
-def _dataset_response(dataset_id: str) -> DatasetDetail:
+def _dataset_response(dataset_id: str, db: Session) -> DatasetDetail:
+    record = _dataset_record(dataset_id, db)
+    if record is not None:
+        metadata = record.metadata_json
+        provenance = _resolve_stored_provenance(record, db)
+        date_range = {
+            "start": record.date_start,
+            "end": record.date_end,
+        }
+        return DatasetDetail(
+            dataset_id=record.dataset_id,
+            sha256=record.sha256,
+            row_count=record.row_count,
+            date_range=date_range,
+            data_frequency=record.data_frequency,
+            is_synthetic=record.is_synthetic,
+            data_source="uploaded",
+            uploader=record.uploader,
+            uploaded_at_utc=record.uploaded_at.isoformat()
+            if record.uploaded_at
+            else metadata.get("uploaded_at_utc"),
+            provenance_status=provenance["provenance_status"],
+            verification=provenance["verification"],
+            verification_summary=provenance["verification_summary"],
+            warning=provenance["warning"],
+        )
+
     dataset_dir = settings.uploads_path / "v1" / dataset_id
     metadata_path = dataset_dir / "metadata.json"
     if not metadata_path.is_file():
@@ -379,24 +571,35 @@ def _provenance_http_error(exc: Exception) -> HTTPException:
 @app.get("/api/v1/data/datasets", response_model=list[DatasetDetail])
 async def list_datasets(
     x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
 ):
     _require_admin(x_admin_api_key, operation="Dataset listing")
+    records = db.scalars(
+        select(models.DatasetRecord).order_by(models.DatasetRecord.uploaded_at.desc())
+    ).all()
+    dataset_ids = {record.dataset_id for record in records}
+    results = [_dataset_response(record.dataset_id, db) for record in records]
     root = settings.uploads_path / "v1"
     if not root.exists():
-        return []
-    return [
-        _dataset_response(directory.name)
+        return results
+    results.extend(
+        _dataset_response(directory.name, db)
         for directory in sorted(root.iterdir())
-        if directory.is_dir()
-    ]
+        if directory.is_dir() and directory.name not in dataset_ids
+    )
+    return results
 
 
 @app.get("/api/v1/data/datasets/{dataset_id}/provenance", response_model=ProvenanceResponse)
 async def dataset_provenance(
     dataset_id: str,
     x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
 ):
     _require_admin(x_admin_api_key, operation="Dataset provenance")
+    record = _dataset_record(dataset_id, db)
+    if record is not None:
+        return _resolve_stored_provenance(record, db)
     try:
         return resolve_provenance(dataset_id, settings.uploads_path)
     except (FileNotFoundError, ProvenanceError) as exc:
@@ -407,9 +610,10 @@ async def dataset_provenance(
 async def dataset_detail(
     dataset_id: str,
     x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
 ):
     _require_admin(x_admin_api_key, operation="Dataset detail")
-    return _dataset_response(dataset_id)
+    return _dataset_response(dataset_id, db)
 
 
 @app.post(
@@ -426,6 +630,7 @@ async def verify_uploaded_dataset(
     evidence_file: UploadFile | None = File(default=None),
     x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
     x_admin_identity: str | None = Header(default=None, alias="X-Admin-Identity"),
+    db: Session = Depends(get_db),
 ):
     _require_admin(x_admin_api_key, operation="Dataset verification")
     evidence: bytes | None = None
@@ -433,6 +638,68 @@ async def verify_uploaded_dataset(
         evidence = await evidence_file.read(MAX_CSV_BYTES + 1)
         if len(evidence) > MAX_CSV_BYTES:
             raise HTTPException(413, "Evidence file must be smaller than 20 MB.")
+    record = _dataset_record(dataset_id, db)
+    if record is not None:
+        evidence_key: str | None = None
+        try:
+            with _dataset_workspace(record, db) as workspace:
+                result = verify_dataset(
+                    dataset_id,
+                    workspace,
+                    source_id=source_id,
+                    verification_method=verification_method,
+                    verification_reference=verification_reference,
+                    reporting_period_start=reporting_period_start,
+                    reporting_period_end=reporting_period_end,
+                    verified_by=x_admin_identity,
+                    evidence_file=evidence,
+                )
+                history_path = workspace / "v1" / dataset_id / "verification.json"
+                event_record = json.loads(history_path.read_text(encoding="utf-8").splitlines()[-1])
+
+            if evidence is not None:
+                evidence_hash = event_record["evidence_file_sha256"]
+                evidence_key = (
+                    f"v1/{dataset_id}/evidence/{uuid.uuid4().hex}/{evidence_hash}"
+                )
+                write_object(
+                    evidence_key,
+                    evidence,
+                    backend=record.storage_backend,
+                )
+                event_record["evidence_object_key"] = evidence_key
+                event_record["evidence_storage_backend"] = record.storage_backend
+            _store_dataset_event(
+                db,
+                dataset_id=dataset_id,
+                dataset_sha256=record.sha256,
+                event_type="verification",
+                actor_subject=x_admin_identity,
+                details=event_record,
+            )
+            db.commit()
+            return result
+        except (FileNotFoundError, ProvenanceError) as exc:
+            db.rollback()
+            raise _provenance_http_error(exc) from exc
+        except (ObjectStorageError, StorageConfigurationError) as exc:
+            db.rollback()
+            if evidence_key:
+                try:
+                    delete_object(evidence_key, backend=record.storage_backend)
+                except (ObjectStorageError, StorageConfigurationError):
+                    logger.exception("Could not clean up unregistered verification evidence.")
+            logger.exception("Could not persist dataset verification.")
+            raise HTTPException(503, "Dataset verification could not be saved.") from exc
+        except Exception as exc:
+            db.rollback()
+            if evidence_key:
+                try:
+                    delete_object(evidence_key, backend=record.storage_backend)
+                except (ObjectStorageError, StorageConfigurationError):
+                    logger.exception("Could not clean up unregistered verification evidence.")
+            logger.exception("Could not persist dataset verification.")
+            raise HTTPException(503, "Dataset verification could not be saved.") from exc
     try:
         return verify_dataset(
             dataset_id,
@@ -458,8 +725,42 @@ async def revoke_uploaded_dataset_verification(
     reason: str = Form(...),
     x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
     x_admin_identity: str | None = Header(default=None, alias="X-Admin-Identity"),
+    db: Session = Depends(get_db),
 ):
     _require_admin(x_admin_api_key, operation="Verification revocation")
+    record = _dataset_record(dataset_id, db)
+    if record is not None:
+        try:
+            with _dataset_workspace(record, db) as workspace:
+                result = revoke_verification(
+                    dataset_id,
+                    workspace,
+                    reason=reason,
+                    revoked_by=x_admin_identity,
+                )
+                history_path = workspace / "v1" / dataset_id / "verification.json"
+                event_record = json.loads(history_path.read_text(encoding="utf-8").splitlines()[-1])
+            _store_dataset_event(
+                db,
+                dataset_id=dataset_id,
+                dataset_sha256=record.sha256,
+                event_type="revocation",
+                actor_subject=x_admin_identity,
+                details=event_record,
+            )
+            db.commit()
+            return result
+        except (FileNotFoundError, ProvenanceError) as exc:
+            db.rollback()
+            raise _provenance_http_error(exc) from exc
+        except (ObjectStorageError, StorageConfigurationError) as exc:
+            db.rollback()
+            logger.exception("Could not persist verification revocation.")
+            raise HTTPException(503, "Verification revocation could not be saved.") from exc
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Could not persist verification revocation.")
+            raise HTTPException(503, "Verification revocation could not be saved.") from exc
     try:
         return revoke_verification(
             dataset_id,

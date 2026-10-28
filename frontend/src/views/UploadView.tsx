@@ -24,7 +24,7 @@ const REQUIRED_COLUMNS = [
   { name: "stock_on_hand", type: "number", description: "Available stock units on hand (&ge; 0)" },
   { name: "units_consumed", type: "number", description: "Units dispensed/consumed during period (&ge; 0)" },
   { name: "units_received", type: "number", description: "Units received into inventory during period (&ge; 0)" },
-  { name: "is_synthetic", type: "boolean", description: "Must explicitly state true or false; unknown provenance is rejected" },
+  { name: "is_synthetic", type: "boolean", description: "State whether the records are synthetic: true or false" },
 ];
 
 const OPTIONAL_COLUMNS = [
@@ -355,11 +355,11 @@ export function UploadView({
                 </li>
               </ul>
 
-              <div className="unverified-warning-box">
-                <Icon name="alert-triangle" size={16} />
+              <div className="upload-info-box">
+                <Icon name="info" size={16} />
                 <p>
-                  <strong>Unverified status:</strong> Uploaded data is explicitly tagged <code>Uploaded (Unverified)</code>.
-                  Its origin has not been confirmed and it is not represented as a confirmed source.
+                  <strong>Upload status:</strong> CSV files are labeled <code>Uploaded</code> based on how they enter the system.
+                  Source verification is not required for in-memory assessment. Synthetic records remain labeled <code>Synthetic</code>.
                 </p>
               </div>
             </aside>
@@ -573,7 +573,7 @@ export function UploadView({
                     <span>
                       Projections assume constant consumption and no incoming deliveries. Showing first {Math.min(result.items.length, 10)} of {formatNum(result.predictions)} records.
                     </span>
-                    <span>Uploaded data is strictly unverified.</span>
+                    <span>Source verification is optional for in-memory assessment.</span>
                   </div>
                 </div>
               )}

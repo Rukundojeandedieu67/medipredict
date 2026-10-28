@@ -1,5 +1,7 @@
 """Backend-only access to the configured dashboard data source."""
 
+from pathlib import Path
+
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
@@ -15,6 +17,14 @@ class StorageConfigurationError(RuntimeError):
 
 class ObjectStorageError(RuntimeError):
     """The configured object could not be read."""
+
+
+def _local_object_path(key: str) -> Path:
+    root = settings.uploads_path.resolve()
+    path = (root / key).resolve()
+    if path == root or root not in path.parents:
+        raise StorageConfigurationError("Object key is outside the configured storage root.")
+    return path
 
 
 def _object_store_client():
@@ -46,6 +56,118 @@ def _object_store_client():
             retries={"max_attempts": 2, "mode": "standard"},
         ),
     )
+
+
+def write_object(
+    key: str,
+    content: bytes,
+    *,
+    backend: str | None = None,
+) -> None:
+    """Write an immutable-key object to the configured local or S3-compatible store."""
+    selected_backend = backend or settings.storage_backend
+    if selected_backend == "local":
+        path = _local_object_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with path.open("xb") as destination:
+                destination.write(content)
+        except FileExistsError as exc:
+            raise ObjectStorageError("The object key already exists.") from exc
+        except OSError as exc:
+            raise ObjectStorageError("The local object could not be written.") from exc
+        return
+
+    if selected_backend != "s3":
+        raise StorageConfigurationError("Unsupported object-storage backend.")
+    try:
+        client = _object_store_client()
+        client.head_object(Bucket=settings.object_store_bucket, Key=key)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
+            raise ObjectStorageError("The object key could not be checked.") from exc
+    except (BotoCoreError, StorageConfigurationError) as exc:
+        if isinstance(exc, StorageConfigurationError):
+            raise
+        raise ObjectStorageError("The object key could not be checked.") from exc
+    else:
+        raise ObjectStorageError("The object key already exists.")
+
+    try:
+        _object_store_client().put_object(
+            Bucket=settings.object_store_bucket,
+            Key=key,
+            Body=content,
+            ContentLength=len(content),
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise ObjectStorageError("The object could not be written to configured storage.") from exc
+
+
+def read_object(
+    key: str,
+    *,
+    max_bytes: int,
+    backend: str | None = None,
+) -> bytes:
+    """Read one bounded object from the configured local or S3-compatible store."""
+    selected_backend = backend or settings.storage_backend
+    if selected_backend == "local":
+        path = _local_object_path(key)
+        try:
+            with path.open("rb") as source:
+                content = source.read(max_bytes + 1)
+        except OSError as exc:
+            raise ObjectStorageError("The local object could not be read.") from exc
+        if len(content) > max_bytes:
+            raise ObjectStorageError("The object exceeds the configured size limit.")
+        return content
+
+    if selected_backend != "s3":
+        raise StorageConfigurationError("Unsupported object-storage backend.")
+
+    try:
+        response = _object_store_client().get_object(
+            Bucket=settings.object_store_bucket,
+            Key=key,
+        )
+        body = response["Body"]
+        try:
+            content_length = response.get("ContentLength")
+            if content_length is not None and content_length > max_bytes:
+                raise ObjectStorageError("The object exceeds the configured size limit.")
+            content = body.read(max_bytes + 1)
+            if len(content) > max_bytes:
+                raise ObjectStorageError("The object exceeds the configured size limit.")
+            return content
+        finally:
+            body.close()
+    except ObjectStorageError:
+        raise
+    except (BotoCoreError, ClientError, KeyError) as exc:
+        raise ObjectStorageError("The object could not be read from configured storage.") from exc
+
+
+def delete_object(key: str, *, backend: str | None = None) -> None:
+    """Delete an object when rolling back an incomplete database registration."""
+    selected_backend = backend or settings.storage_backend
+    if selected_backend == "local":
+        path = _local_object_path(key)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise ObjectStorageError("The local object could not be removed.") from exc
+        return
+
+    if selected_backend != "s3":
+        raise StorageConfigurationError("Unsupported object-storage backend.")
+    try:
+        _object_store_client().delete_object(
+            Bucket=settings.object_store_bucket,
+            Key=key,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise ObjectStorageError("The object could not be removed from configured storage.") from exc
 
 
 def read_dashboard_csv() -> bytes | None:

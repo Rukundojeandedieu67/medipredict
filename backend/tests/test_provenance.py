@@ -11,8 +11,12 @@ from backend.app.provenance import (
     verify_dataset,
 )
 from backend.app import main
+from backend.app import models
+from backend.app.database import Base, get_db
 from backend.app.validation import ValidationConfig
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 
 TEST_DATASET_ID = "v1-20260101T000000Z-" + "a" * 32
@@ -232,80 +236,114 @@ def test_admin_only_api_verify_revoke_detail_and_list(tmp_path, monkeypatch):
         "TEST-FAC-001,TEST-ITEM-001,0001-01-02,9,1,0,false\n"
     ).encode()
 
-    with TestClient(main.app) as client:
-        uploaded = client.post(
-            "/api/v1/data/training-upload",
-            files={"file": ("dataset.csv", content, "text/csv")},
-            headers={"X-Admin-API-Key": "test-admin-key", "X-Uploader": "TEST-UPLOADER-001"},
-        )
-        assert uploaded.status_code == 200
-        dataset_id = uploaded.json()["dataset_id"]
-        assert uploaded.json()["provenance_status"] == "uploaded_unverified"
+    test_engine = create_engine(
+        f"sqlite:///{(tmp_path / 'registry.db').as_posix()}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(test_engine)
+    test_session = sessionmaker(bind=test_engine, expire_on_commit=False)
 
-        forbidden = client.post(
-            f"/api/v1/data/datasets/{dataset_id}/verify",
-            data={
-                "source_id": TEST_SOURCE_ID,
-                "verification_method": "direct_export_from_system",
-                "verification_reference": "TEST-REF-001",
-                "reporting_period_start": "0001-01-01",
-                "reporting_period_end": "0001-01-02",
-            },
-        )
-        assert forbidden.status_code == 403
+    def override_get_db():
+        session = test_session()
+        try:
+            yield session
+        finally:
+            session.close()
 
-        headers = {
-            "X-Admin-API-Key": "test-admin-key",
-            "X-Admin-Identity": "TEST-VERIFIER-001",
-        }
-        same_person = client.post(
-            f"/api/v1/data/datasets/{dataset_id}/verify",
-            data={
-                "source_id": TEST_SOURCE_ID,
-                "verification_method": "direct_export_from_system",
-                "verification_reference": "TEST-REF-SAME-PERSON",
-                "reporting_period_start": "0001-01-01",
-                "reporting_period_end": "0001-01-02",
-            },
-            headers={**headers, "X-Admin-Identity": "TEST-UPLOADER-001"},
-        )
-        assert same_person.status_code == 422
-        assert "different person" in same_person.text
+    main.app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(main.app) as client:
+            uploaded = client.post(
+                "/api/v1/data/training-upload",
+                files={"file": ("dataset.csv", content, "text/csv")},
+                headers={"X-Admin-API-Key": "test-admin-key", "X-Uploader": "TEST-UPLOADER-001"},
+            )
+            assert uploaded.status_code == 200
+            dataset_id = uploaded.json()["dataset_id"]
+            assert uploaded.json()["provenance_status"] == "uploaded_unverified"
 
-        verified = client.post(
-            f"/api/v1/data/datasets/{dataset_id}/verify",
-            data={
-                "source_id": TEST_SOURCE_ID,
-                "verification_method": "direct_export_from_system",
-                "verification_reference": "TEST-REF-001",
-                "reporting_period_start": "0001-01-01",
-                "reporting_period_end": "0001-01-02",
-            },
-            headers=headers,
-        )
-        assert verified.status_code == 200
-        assert verified.json()["provenance_status"] == "verified"
-        assert verified.json()["verification"]["source"]["name"] == "TEST SOURCE"
-        assert verified.json()["verification_summary"]["single_party"] is False
+            forbidden = client.post(
+                f"/api/v1/data/datasets/{dataset_id}/verify",
+                data={
+                    "source_id": TEST_SOURCE_ID,
+                    "verification_method": "direct_export_from_system",
+                    "verification_reference": "TEST-REF-001",
+                    "reporting_period_start": "0001-01-01",
+                    "reporting_period_end": "0001-01-02",
+                },
+            )
+            assert forbidden.status_code == 403
 
-        detail = client.get(
-            f"/api/v1/data/datasets/{dataset_id}", headers=headers
-        )
-        listing = client.get("/api/v1/data/datasets", headers=headers)
-        provenance = client.get(
-            f"/api/v1/data/datasets/{dataset_id}/provenance", headers=headers
-        )
-        assert detail.json()["provenance_status"] == "verified"
-        assert listing.json()[0]["provenance_status"] == "verified"
-        assert provenance.json()["provenance_status"] == "verified"
+            headers = {
+                "X-Admin-API-Key": "test-admin-key",
+                "X-Admin-Identity": "TEST-VERIFIER-001",
+            }
+            same_person = client.post(
+                f"/api/v1/data/datasets/{dataset_id}/verify",
+                data={
+                    "source_id": TEST_SOURCE_ID,
+                    "verification_method": "direct_export_from_system",
+                    "verification_reference": "TEST-REF-SAME-PERSON",
+                    "reporting_period_start": "0001-01-01",
+                    "reporting_period_end": "0001-01-02",
+                },
+                headers={**headers, "X-Admin-Identity": "TEST-UPLOADER-001"},
+            )
+            assert same_person.status_code == 422
+            assert "different person" in same_person.text
 
-        revoked = client.post(
-            f"/api/v1/data/datasets/{dataset_id}/revoke-verification",
-            data={"reason": "TEST-REVOCATION-001"},
-            headers=headers,
-        )
-        assert revoked.status_code == 200
-        assert revoked.json()["provenance_status"] == "uploaded_unverified"
+            verified = client.post(
+                f"/api/v1/data/datasets/{dataset_id}/verify",
+                data={
+                    "source_id": TEST_SOURCE_ID,
+                    "verification_method": "direct_export_from_system",
+                    "verification_reference": "TEST-REF-001",
+                    "reporting_period_start": "0001-01-01",
+                    "reporting_period_end": "0001-01-02",
+                },
+                headers=headers,
+            )
+            assert verified.status_code == 200
+            assert verified.json()["provenance_status"] == "verified"
+            assert verified.json()["verification"]["source"]["name"] == "TEST SOURCE"
+            assert verified.json()["verification_summary"]["single_party"] is False
+
+            detail = client.get(
+                f"/api/v1/data/datasets/{dataset_id}", headers=headers
+            )
+            listing = client.get("/api/v1/data/datasets", headers=headers)
+            provenance = client.get(
+                f"/api/v1/data/datasets/{dataset_id}/provenance", headers=headers
+            )
+            assert detail.json()["provenance_status"] == "verified"
+            assert listing.json()[0]["provenance_status"] == "verified"
+            assert provenance.json()["provenance_status"] == "verified"
+
+            revoked = client.post(
+                f"/api/v1/data/datasets/{dataset_id}/revoke-verification",
+                data={"reason": "TEST-REVOCATION-001"},
+                headers=headers,
+            )
+            assert revoked.status_code == 200
+            assert revoked.json()["provenance_status"] == "uploaded_unverified"
+
+        with test_session() as session:
+            stored_dataset = session.get(models.DatasetRecord, dataset_id)
+            events = session.scalars(
+                select(models.DatasetEvent)
+                .where(models.DatasetEvent.dataset_id == dataset_id)
+                .order_by(models.DatasetEvent.occurred_at, models.DatasetEvent.event_id)
+            ).all()
+            assert stored_dataset is not None
+            assert stored_dataset.sha256 == hashlib.sha256(content).hexdigest()
+            assert [event.event_type for event in events] == [
+                "upload",
+                "verification",
+                "revocation",
+            ]
+    finally:
+        main.app.dependency_overrides.pop(get_db, None)
+        test_engine.dispose()
 
 
 def test_verification_stores_and_hashes_supporting_evidence(dataset):

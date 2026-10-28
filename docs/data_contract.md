@@ -62,11 +62,11 @@ The API-side frequency is configured with `MEDIPREDICT_DATA_FREQUENCY=daily|mont
 - Deprecated `POST /api/v1/data/upload-csv` is an alias for `/assess-csv`.
 - `MEDIPREDICT_ADMIN_API_KEY` configures the training-upload API key. Send it in `X-Admin-API-Key`; optionally identify the uploader with `X-Uploader`. Without the configured key, training upload is disabled.
 
-Assessment results use `data_source="uploaded"` because the ingest path is an upload. `is_synthetic` preserves the submitted declaration. Training-upload metadata uses the same ingest-path value and retains the supplied synthetic flag (or `null` when a dataset mixes true and false rows).
+Assessment results use `data_source="uploaded"` because the ingest path is an upload; source verification is not required for in-memory assessment or training upload. `is_synthetic` preserves the submitted declaration. Training-upload metadata uses the same ingest-path value and retains the supplied synthetic flag (or `null` when a dataset mixes true and false rows).
 
 Provenance status is derived and is never accepted from request data: `synthetic` for a dataset marked synthetic, `uploaded_unverified` for a non-synthetic file without a current valid verification record, and `verified` only when an authorized verification record matches the current stored-file SHA-256 and has not been revoked. A reporting period must cover the CSV's date range. If the stored-file hash changes, status falls back to `uploaded_unverified` and a warning is logged. The two-person check compares the stored uploader identity with the administrator identity supplied at verification; if either identity is unavailable, the response marks the verification `single_party`.
 
-The approved-source registry ships with no approved sources. Its entries must be confirmed with the data owner (e.g., RMS / RBC / MoH) before use. Current UI provenance badges distinguish `Synthetic`, `Uploaded (Unverified)`, and `Verified Source`; only the last state includes source and verification details.
+The approved-source registry ships with no approved sources. Its entries must be confirmed with the data owner (e.g., RMS / RBC / MoH) before use. The UI labels CSV intake as `Uploaded`; synthetic records remain labeled `Synthetic`. A `Verified Source` badge is shown only when an authorized verification record exists, and includes its source and verification details. Verification is optional for assessment and upload; the API's `uploaded_unverified` status identifies a stored dataset that has no verification record and does not prevent its normal upload or in-memory assessment.
 
 ## Label and split preparation
 

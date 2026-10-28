@@ -90,9 +90,9 @@ export function ProvenanceBadge({
       ) : (
         <span
           className="assessment-badge source-badge uploaded"
-          title="Not marked synthetic, but its origin has not been confirmed."
+          title="Provided through CSV upload; source verification is not required for assessment."
         >
-          Uploaded (Unverified)
+          Uploaded
         </span>
       )}
       {item.provenance_status === "verified" && item.verification && (
@@ -129,9 +129,9 @@ export function ProvenanceStatusBadge({ status }: { status: ProvenanceStatus }) 
   return (
     <span
       className="assessment-badge source-badge uploaded"
-      title="Not marked synthetic, but its origin has not been confirmed."
+      title="Provided through CSV upload; source verification is optional."
     >
-      Uploaded (Unverified)
+      Uploaded
     </span>
   );
 }
