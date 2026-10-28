@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { CsvAssessmentItem, FeatureImportance, RiskRecord, Summary, TransferCandidate, TrustMetrics, UploadResult } from "./types";
+import type { CsvAssessmentItem, FeatureImportance, RiskRecord, StockAlert, Summary, TransferCandidate, TrustMetrics, UploadResult } from "./types";
 
-type View = "overview" | "risk" | "transfers" | "trust" | "upload";
+type View = "overview" | "alerts" | "risk" | "transfers" | "trust" | "upload";
 type IconName = "grid" | "pulse" | "truck" | "shield" | "upload" | "refresh" | "search" | "arrow" | "close" | "check" | "alert" | "file" | "chevron";
 
 const navItems: { id: View; label: string; icon: IconName }[] = [
   { id: "overview", label: "Overview", icon: "grid" },
+  { id: "alerts", label: "Stock alerts", icon: "alert" },
   { id: "risk", label: "Risk register", icon: "pulse" },
   { id: "transfers", label: "Stock transfers", icon: "truck" },
   { id: "trust", label: "Model insights", icon: "shield" },
@@ -17,6 +18,19 @@ async function fetchApi<T>(path: string): Promise<T> {
   const response = await fetch(`/api/v1/${path}`);
   if (!response.ok) throw new Error(await getResponseError(response));
   return response.json() as Promise<T>;
+}
+
+function AlertsView({ alerts, loading }: { alerts: StockAlert[]; loading: boolean }) {
+  return <section className="view-section">
+    <div className="section-intro"><div><div className="eyebrow"><span className="eyebrow-line" />STOCK MONITORING</div><h1>Stock alerts<span className="heading-period">.</span></h1><p className="page-subtitle">Current reported stock-out, low-cover, and missing-consumption warnings.</p></div><span className="result-count">{formatNumber(alerts.length)} active alerts</span></div>
+    <div className="notice-card"><span className="notice-icon"><Icon name="alert" size={18} /></span><div><strong>Stock availability estimates</strong><p>7- and 14-day remaining stock is estimated from current stock and reported average daily consumption, assuming a constant rate and no incoming receipts. This is a simple projection, not a trained forecast. Confirm stock, consumption, and expected deliveries before acting.</p></div></div>
+    <div className="panel">
+      {alerts.length ? <div className="table-wrap"><table className="full-table"><thead><tr><th>Priority</th><th>Facility / district</th><th>Medicine</th><th>Available</th><th>Daily use</th><th>After 7 days</th><th>After 14 days</th><th>Cover</th><th>Reported</th><th>Data</th></tr></thead><tbody>
+        {alerts.map((alert) => <tr key={alert.alert_id}><td><span className={`risk-badge ${alert.severity}`}>{alert.alert_type.replaceAll("_", " ")}</span></td><td><strong>{alert.facility}</strong><span>{alert.district}</span></td><td><strong>{alert.medicine}</strong><span>{alert.medicine_code}</span></td><td>{formatNumber(alert.stock_units)} <small>units</small></td><td>{formatNumber(alert.daily_consumption)} <small>units/day</small></td><td>{formatNumber(alert.estimated_stock_after_7_days)} <small>units</small></td><td>{formatNumber(alert.estimated_stock_after_14_days)} <small>units</small></td><td>{formatDays(alert.lead_time_days)}</td><td>{alert.reporting_date}</td><td><span className={`assessment-badge ${alert.is_synthetic ? "synthetic-badge" : "source-badge"}`}>{alert.is_synthetic ? "Synthetic" : alert.data_source === "uploaded" ? "Uploaded" : "Real"}</span><span className="alert-message">{alert.message}</span></td></tr>)}
+      </tbody></table></div> : <EmptyState>{loading ? "Loading stock alerts…" : "No active stock warnings in the latest reported snapshot."}</EmptyState>}
+      <div className="table-bottom"><span>Alerts use the latest available row per facility and medicine.</span><span>Not a forecast</span></div>
+    </div>
+  </section>;
 }
 
 async function getResponseError(response: Response): Promise<string> {
@@ -80,8 +94,8 @@ function EmptyState({ children }: { children: ReactNode }) {
   return <div className="empty-state"><span className="empty-icon"><Icon name="file" size={21} /></span><p>{children}</p></div>;
 }
 
-function formatNumber(value: number | undefined) {
-  return value === undefined || !Number.isFinite(value) ? "—" : new Intl.NumberFormat().format(value);
+function formatNumber(value: number | null | undefined) {
+  return value == null || !Number.isFinite(value) ? "—" : new Intl.NumberFormat().format(value);
 }
 
 function formatDays(value: number | null) {
@@ -109,6 +123,7 @@ function App() {
   const [view, setView] = useState<View>("overview");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [risks, setRisks] = useState<RiskRecord[]>([]);
+  const [alerts, setAlerts] = useState<StockAlert[]>([]);
   const [transfers, setTransfers] = useState<TransferCandidate[]>([]);
   const [metrics, setMetrics] = useState<TrustMetrics | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -126,11 +141,12 @@ function App() {
       fetchApi<{ status: string }>("health"),
       fetchApi<Summary>("inventory/summary"),
       fetchApi<RiskRecord[]>("predictions/risk-register?limit=5000"),
+      fetchApi<StockAlert[]>("alerts"),
       fetchApi<TransferCandidate[]>("transfers/recommendations"),
       fetchApi<TrustMetrics>("analytics/trust-metrics"),
     ]);
     const messages: string[] = [];
-    const [healthResult, summaryResult, riskResult, transferResult, metricsResult] = requests;
+    const [healthResult, summaryResult, riskResult, alertResult, transferResult, metricsResult] = requests;
     setApiConnected(healthResult.status === "fulfilled" && healthResult.value.status === "ok");
     if (healthResult.status === "rejected") {
       messages.push(`API health: ${healthResult.reason instanceof Error ? healthResult.reason.message : "request failed"}`);
@@ -146,6 +162,11 @@ function App() {
     else {
       setRisks([]);
       messages.push(`Risk register: ${riskResult.reason instanceof Error ? riskResult.reason.message : "request failed"}`);
+    }
+    if (alertResult.status === "fulfilled") setAlerts(alertResult.value);
+    else {
+      setAlerts([]);
+      messages.push(`Stock alerts: ${alertResult.reason instanceof Error ? alertResult.reason.message : "request failed"}`);
     }
     if (transferResult.status === "fulfilled") setTransfers(transferResult.value);
     else {
@@ -208,7 +229,7 @@ function App() {
       <div className="workspace-label">WORKSPACE</div>
       <nav className="main-nav" aria-label="Main navigation">
         {navItems.map((item) => <button key={item.id} type="button" title={item.label} aria-label={item.label} aria-current={view === item.id ? "page" : undefined} className={`nav-link ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}>
-          <Icon name={item.icon} /><span>{item.label}</span>{item.id === "risk" && summary && <span className="nav-count">{formatNumber(summary.critical)}</span>}
+          <Icon name={item.icon} /><span>{item.label}</span>{item.id === "alerts" && alerts.length > 0 && <span className="nav-count">{formatNumber(alerts.length)}</span>}
         </button>)}
       </nav>
       <div className="sidebar-bottom">
@@ -229,6 +250,7 @@ function App() {
         <div className="data-notice"><span className="notice-icon"><Icon name="alert" size={17} /></span><p><strong>Demonstration data</strong><span>Inventory, consumption, and risk predictions are synthetic. District indicators are unverified seed values. Do not use for operational decisions.</span></p><button type="button" onClick={() => setView("trust")}>Model limitations <Icon name="arrow" size={13} /></button></div>
 
         {view === "overview" && <Overview summary={summary} risks={risks} transfers={transfers} loading={loading} onNavigate={setView} />}
+        {view === "alerts" && <AlertsView alerts={alerts} loading={loading} />}
         {view === "risk" && <RiskRegister rows={filteredRisks} query={query} setQuery={setQuery} riskFilter={riskFilter} setRiskFilter={setRiskFilter} loading={loading} />}
         {view === "transfers" && <TransferView rows={transfers} loading={loading} />}
         {view === "trust" && <TrustView metrics={metrics} loading={loading} />}
@@ -241,15 +263,17 @@ function App() {
 }
 
 function Overview({ summary, risks, transfers, loading, onNavigate }: { summary: Summary | null; risks: RiskRecord[]; transfers: TransferCandidate[]; loading: boolean; onNavigate: (view: View) => void }) {
-  const priorityRows = [...risks].filter((item) => item.risk_level.toLowerCase() === "critical").sort((a, b) => a.lead_time_days - b.lead_time_days).slice(0, 5);
-  const totalRisk = (summary?.critical ?? 0) + (summary?.moderate ?? 0) + (summary?.stable ?? 0);
+  const priorityRows = [...risks].filter((item) => item.risk_level.toLowerCase() === "critical").sort((a, b) => (a.lead_time_days ?? 0) - (b.lead_time_days ?? 0)).slice(0, 5);
+  const totalRisk = (summary?.critical ?? 0) + (summary?.moderate ?? 0) + (summary?.stable ?? 0) + (summary?.unknown ?? 0);
   const criticalPercent = totalRisk ? Math.round((summary!.critical / totalRisk) * 100) : 0;
   const moderatePercent = totalRisk ? Math.round((summary!.moderate / totalRisk) * 100) : 0;
+  const stablePercent = totalRisk ? Math.round((summary!.stable / totalRisk) * 100) : 0;
+  const unknownPercent = totalRisk ? Math.round((summary!.unknown / totalRisk) * 100) : 0;
   return <>
     <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" />SUPPLY WATCH</div><h1>Good morning<span className="heading-period">.</span></h1><p className="page-subtitle">A clear view of medicine availability across Rwanda.</p></div><button type="button" className="primary-button" onClick={() => onNavigate("upload")}><Icon name="upload" size={16} /> Upload facility data</button></section>
     <section className="stat-grid">
       <StatCard label="Facilities monitored" value={summary ? formatNumber(summary.facilities) : loading ? "—" : "Unavailable"} note={`${formatNumber(summary?.districts)} districts represented`} icon="grid" tone="mint" />
-      <StatCard label="Critical stock alerts" value={summary ? formatNumber(summary.critical) : loading ? "—" : "Unavailable"} note="Facilities requiring attention" icon="alert" tone="rose" />
+      <StatCard label="Critical stock alerts" value={summary ? formatNumber(summary.critical) : loading ? "—" : "Unavailable"} note={`${formatNumber(summary?.moderate)} additional low-cover warnings`} icon="alert" tone="rose" />
       <StatCard label="Medicines tracked" value={summary ? formatNumber(summary.medicines) : loading ? "—" : "Unavailable"} note={`${formatNumber(summary?.stock_units)} total units reported`} icon="file" tone="blue" />
       <StatCard label="Transfer opportunities" value={formatNumber(transfers.length)} note="Suggested stock rebalancing" icon="truck" tone="amber" />
     </section>
@@ -257,20 +281,22 @@ function Overview({ summary, risks, transfers, loading, onNavigate }: { summary:
       <article className="panel risk-panel">
         <div className="panel-heading"><div><div className="eyebrow small">ATTENTION REQUIRED</div><h2>Priority stock alerts</h2></div><button className="text-button" onClick={() => onNavigate("risk")}>View risk register <Icon name="arrow" size={14} /></button></div>
         {loading && !risks.length ? <div className="table-loading">Loading risk register…</div> : priorityRows.length ? <div className="table-wrap"><table><thead><tr><th>Facility &amp; district</th><th>Medicine</th><th>Cover</th><th>Risk</th></tr></thead><tbody>{priorityRows.map((row, index) => <tr key={`${row.facility}-${row.medicine_code}-${index}`}><td><strong>{row.facility}</strong><span>{row.district}</span></td><td>{row.medicine}<span>{row.medicine_code}</span></td><td><strong className="cover-critical">{formatDays(row.lead_time_days)}</strong></td><td><RiskBadge risk={row.risk_level} /><AssessmentBadges item={row} /></td></tr>)}</tbody></table></div> : <EmptyState>{loading ? "Loading priority alerts…" : "No critical alerts are currently available."}</EmptyState>}
-        <div className="panel-footnote">Risk classifications shown are generated from synthetic demonstration data.</div>
+        <div className="panel-footnote">Rule-based stock-cover tiers: Critical &lt;7 days, Moderate 7–14 days, Stable &gt;14 days. Unknown means consumption is unavailable. Verify alerts against source records.</div>
       </article>
       <article className="panel distribution-panel">
         <div className="panel-heading"><div><div className="eyebrow small">INVENTORY HEALTH</div><h2>Risk distribution</h2></div><span className="soft-tag">All records</span></div>
         <div className="distribution-total"><strong>{summary ? formatNumber(totalRisk) : "—"}</strong><span>facility–medicine records</span></div>
-        <div className="stacked-bar" role="img" aria-label={`Risk distribution: ${summary?.critical ?? 0} critical, ${summary?.moderate ?? 0} moderate, ${summary?.stable ?? 0} stable`}>
+        <div className="stacked-bar" role="img" aria-label={`Risk distribution: ${summary?.critical ?? 0} critical, ${summary?.moderate ?? 0} moderate, ${summary?.stable ?? 0} stable, ${summary?.unknown ?? 0} with unavailable cover`}>
           <span className="segment critical-segment" style={{ width: `${totalRisk ? (summary!.critical / totalRisk) * 100 : 0}%` }} />
           <span className="segment moderate-segment" style={{ width: `${totalRisk ? (summary!.moderate / totalRisk) * 100 : 0}%` }} />
           <span className="segment stable-segment" style={{ width: `${totalRisk ? (summary!.stable / totalRisk) * 100 : 0}%` }} />
+          <span className="segment unknown-segment" style={{ width: `${totalRisk ? (summary!.unknown / totalRisk) * 100 : 0}%` }} />
         </div>
         <div className="distribution-list">
           <DistributionItem label="Critical" count={summary?.critical} percent={criticalPercent} tone="critical" />
           <DistributionItem label="Moderate" count={summary?.moderate} percent={moderatePercent} tone="moderate" />
-          <DistributionItem label="Stable" count={summary?.stable} percent={summary ? Math.max(0, 100 - criticalPercent - moderatePercent) : 0} tone="stable" />
+          <DistributionItem label="Stable" count={summary?.stable} percent={stablePercent} tone="stable" />
+          <DistributionItem label="Cover unavailable" count={summary?.unknown} percent={unknownPercent} tone="unknown" />
         </div>
         <div className="distribution-foot"><span>Based on latest reporting period</span><span>{summary?.reporting_date ?? "—"}</span></div>
       </article>
@@ -287,8 +313,8 @@ function RiskRegister({ rows, query, setQuery, riskFilter, setRiskFilter, loadin
   return <section className="view-section">
     <div className="section-intro"><div><div className="eyebrow"><span className="eyebrow-line" />MONITORING</div><h1>Risk register<span className="heading-period">.</span></h1><p className="page-subtitle">Review medicine availability signals by facility and district.</p></div><span className="result-count">{formatNumber(rows.length)} records</span></div>
     <div className="panel">
-      <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search facility, medicine, or district" /></label><select aria-label="Filter by risk level" value={riskFilter} onChange={(event) => setRiskFilter(event.target.value)}><option>All risk levels</option><option>Critical</option><option>Moderate</option><option>Stable</option></select></div>
-      <div className="table-wrap"><table className="full-table"><thead><tr><th>Facility</th><th>District</th><th>Medicine</th><th>Stock</th><th>Daily use</th><th>Stock cover</th><th>Risk level</th><th>Confidence</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.facility}-${row.medicine_code}-${index}`}><td><strong>{row.facility}</strong><span>{row.province}</span></td><td>{row.district}</td><td><strong>{row.medicine}</strong><span>{row.medicine_code}</span></td><td>{formatNumber(row.stock_units)} <small>units</small></td><td>{formatNumber(row.daily_consumption)} <small>units</small></td><td>{formatDays(row.lead_time_days)}</td><td><RiskBadge risk={row.risk_level} /><AssessmentBadges item={row} /></td><td title={row.confidence_note}>{formatConfidence(row.confidence)}</td></tr>)}</tbody></table>
+      <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search facility, medicine, or district" /></label><select aria-label="Filter by risk level" value={riskFilter} onChange={(event) => setRiskFilter(event.target.value)}><option>All risk levels</option><option>Critical</option><option>Moderate</option><option>Stable</option><option>Unknown</option></select></div>
+      <div className="table-wrap"><table className="full-table"><thead><tr><th>Facility</th><th>District</th><th>Medicine</th><th>Stock now</th><th>Daily use</th><th>After 7 days</th><th>After 14 days</th><th>Stock cover</th><th>Risk level</th><th>Confidence</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.facility}-${row.medicine_code}-${index}`}><td><strong>{row.facility}</strong><span>{row.province}</span></td><td>{row.district}</td><td><strong>{row.medicine}</strong><span>{row.medicine_code}</span></td><td>{formatNumber(row.stock_units)} <small>units</small></td><td>{formatNumber(row.daily_consumption)} <small>units</small></td><td>{formatNumber(row.estimated_stock_after_7_days)} <small>units</small></td><td>{formatNumber(row.estimated_stock_after_14_days)} <small>units</small></td><td>{formatDays(row.lead_time_days)}</td><td><RiskBadge risk={row.risk_level} /><AssessmentBadges item={row} /></td><td title={row.confidence_note}>{formatConfidence(row.confidence)}</td></tr>)}</tbody></table>
         {!rows.length && <EmptyState>{loading ? "Loading risk records…" : "No records match these filters."}</EmptyState>}</div>
       <div className="table-bottom"><span>Showing up to 5,000 records from the API.</span><span>Demonstration data only</span></div>
     </div>
@@ -333,7 +359,7 @@ function UploadView({ result, error, uploading, onSelect }: { result: UploadResu
     <div className="section-intro"><div><div className="eyebrow"><span className="eyebrow-line" />DATA INTAKE</div><h1>Upload facility data<span className="heading-period">.</span></h1><p className="page-subtitle">Run a risk assessment on a facility inventory CSV.</p></div></div>
     <div className="upload-layout"><article className="panel upload-panel"><div className="upload-heading"><span className="upload-symbol"><Icon name="upload" size={23} /></span><div><h2>Assess daily inventory CSV</h2><p>Assessment is in-memory only; it does not save or train.</p></div></div><label className={`dropzone ${uploading ? "is-uploading" : ""}`}><input ref={inputRef} type="file" accept=".csv,text/csv" disabled={uploading} onChange={(event) => handleFile(event.target.files?.[0])} /><span className="drop-icon"><Icon name="file" size={25} /></span><strong>{uploading ? "Assessing file…" : fileName || "Choose a CSV file to assess"}</strong><span>{uploading ? "Please wait while the assessment is generated" : "Select a file from your computer · CSV format"}</span><span className="browse-button">{uploading ? "Working…" : "Browse files"}</span></label>{error && <div className="inline-error" role="alert"><Icon name="alert" size={16} />{error}</div>}<div className="required-fields"><strong>Required CSV columns</strong><p>facility_id, item_id, date (YYYY-MM-DD), stock_on_hand, units_consumed, units_received, is_synthetic (true or false)</p><strong>Optional columns</strong><p>stockout_flag, lead_time_days, reorder_level, facility_type, region</p></div></article>
       <aside className="upload-aside"><div className="eyebrow small">BEFORE YOU UPLOAD</div><ul><li><span><Icon name="check" size={14} /></span>Daily stock and movement quantities must be non-negative.</li><li><span><Icon name="check" size={14} /></span>State is_synthetic as true or false; unknown provenance is rejected.</li><li><span><Icon name="check" size={14} /></span>Assessment warns on short histories; training requires at least 90 records per pair and 12 pairs.</li><li><span><Icon name="check" size={14} /></span>Maximum file size is 20 MB; CSV only.</li></ul><div className="upload-note"><Icon name="alert" size={17} /><p>Assessment uses fixed days-of-cover rules. It is not a trained prediction, and no confidence probability is reported.</p></div></aside></div>
-    {result && <article className="panel upload-results"><div className="panel-heading"><div><div className="eyebrow small">ASSESSMENT COMPLETE</div><h2>Assessment summary</h2></div><span className="success-tag"><Icon name="check" size={14} />Completed</span></div><div className="upload-stat-grid"><div><span>Records received</span><strong>{formatNumber(result.records_received)}</strong></div><div><span>Assessments generated</span><strong>{formatNumber(result.predictions)}</strong></div><div><span>Critical</span><strong className="text-critical">{formatNumber(result.critical)}</strong></div><div><span>Moderate</span><strong className="text-moderate">{formatNumber(result.moderate)}</strong></div><div><span>Stable</span><strong className="text-stable">{formatNumber(result.stable)}</strong></div></div>{result.validation.warnings.length > 0 && <div className="panel-footnote">Validation warnings: {formatNumber(result.validation.total_counts.returned_warnings)} shown of {formatNumber(result.validation.total_counts.warnings)} total.{result.validation.total_counts.warnings_truncated ? " Warning list is capped." : ""}</div>}{result.items.length > 0 && <><div className="table-wrap"><table><thead><tr><th>Facility / item</th><th>Date</th><th>Stock cover</th><th>Risk and method</th><th>Confidence</th></tr></thead><tbody>{result.items.slice(0, 8).map((item: CsvAssessmentItem, index) => <tr key={`${item.facility_id}-${item.item_id}-${index}`}><td>{item.facility_id}<span>{item.item_id}</span></td><td>{item.date}</td><td>{formatDays(item.lead_time_days)}</td><td><RiskBadge risk={item.risk_level} /><AssessmentBadges item={item} /></td><td title={item.confidence_note}>{formatConfidence(item.confidence)}</td></tr>)}</tbody></table></div><div className="panel-footnote">Showing {Math.min(result.items.length, 8)} of {formatNumber(result.predictions)} records. Rule-based estimates are not AI predictions.</div></>}</article>}
+    {result && <article className="panel upload-results"><div className="panel-heading"><div><div className="eyebrow small">ASSESSMENT COMPLETE</div><h2>Assessment summary</h2></div><span className="success-tag"><Icon name="check" size={14} />Completed</span></div><div className="upload-stat-grid"><div><span>Records received</span><strong>{formatNumber(result.records_received)}</strong></div><div><span>Assessments generated</span><strong>{formatNumber(result.predictions)}</strong></div><div><span>Critical</span><strong className="text-critical">{formatNumber(result.critical)}</strong></div><div><span>Moderate</span><strong className="text-moderate">{formatNumber(result.moderate)}</strong></div><div><span>Stable</span><strong className="text-stable">{formatNumber(result.stable)}</strong></div></div>{result.validation.warnings.length > 0 && <div className="panel-footnote">Validation warnings: {formatNumber(result.validation.total_counts.returned_warnings)} shown of {formatNumber(result.validation.total_counts.warnings)} total.{result.validation.total_counts.warnings_truncated ? " Warning list is capped." : ""}</div>}{result.items.length > 0 && <><div className="table-wrap"><table><thead><tr><th>Facility / item</th><th>Date</th><th>Available stock</th><th>After 7 days</th><th>After 14 days</th><th>Estimated cover</th><th>Risk and method</th><th>Confidence</th></tr></thead><tbody>{result.items.slice(0, 8).map((item: CsvAssessmentItem, index) => <tr key={`${item.facility_id}-${item.item_id}-${index}`}><td>{item.facility_id}<span>{item.item_id}</span></td><td>{item.date}</td><td>{formatNumber(item.stock_on_hand)} <small>units</small></td><td>{formatNumber(item.estimated_stock_after_7_days)} <small>units</small></td><td>{formatNumber(item.estimated_stock_after_14_days)} <small>units</small></td><td>{formatDays(item.lead_time_days)}</td><td><RiskBadge risk={item.risk_level} /><AssessmentBadges item={item} /></td><td title={item.confidence_note}>{formatConfidence(item.confidence)}</td></tr>)}</tbody></table></div><div className="panel-footnote">Projections assume constant reported daily consumption and no incoming receipts. Showing {Math.min(result.items.length, 8)} of {formatNumber(result.predictions)} records. Rule-based estimates are not AI predictions.</div></>}</article>}
   </section>;
 }
 

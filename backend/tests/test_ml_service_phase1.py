@@ -81,11 +81,43 @@ def test_fallback_has_no_confidence_and_is_explicitly_rule_based(monkeypatch, tm
     assert result["model_validated"] is False
     assert result["confidence"] is None
     assert result["confidence_note"] == (
-        "Rule-based days-of-cover estimate using fixed thresholds (<7, 7-14, >14 days). "
-        "Not a probability."
+        "Stock-cover estimate uses reported stock and average daily consumption. "
+        "Assumes constant consumption and no incoming receipts; not a probability."
     )
+    assert result["lead_time_days"] == 8
+    assert result["estimated_stock_after_7_days"] == 5
+    assert result["estimated_stock_after_14_days"] == 0
     assert result["data_source"] == "synthetic"
     assert result["is_synthetic"] is True
+
+
+@pytest.mark.parametrize(
+    ("stock", "consumption", "days", "expected"),
+    [
+        (100, 4, 7, 72),
+        (50, 5, 14, 0),
+        (0, 0, 7, 0),
+        (100, 0, 7, None),
+        (-1, 2, 7, None),
+        (100, float("nan"), 7, None),
+    ],
+)
+def test_stock_projection_uses_available_stock_and_safe_bounds(
+    stock, consumption, days, expected
+):
+    assert ml_service.estimate_stock_after_days(stock, consumption, days) == expected
+
+
+def test_recorded_stockout_is_critical_even_when_current_cover_exceeds_threshold(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(ml_service.settings, "model_path", tmp_path / "missing.joblib")
+    record = {**_record(), "stockout_flag": True}
+
+    result = ml_service.infer([record])[0]
+
+    assert result["lead_time_days"] == 8
+    assert result["risk_level"] == "CRITICAL"
 
 
 def test_unvalidated_artifact_is_rejected_and_fallback_used(
@@ -94,6 +126,7 @@ def test_unvalidated_artifact_is_rejected_and_fallback_used(
     _set_artifact_paths(monkeypatch, tmp_path, {"accuracy": 0.9875})
 
     with caplog.at_level(logging.WARNING, logger="backend.app.ml_service"):
+        assert ml_service.get_model_bundle() == (None, None)
         result = ml_service.infer([_record()])[0]
 
     assert result["method"] == "rule_based_fallback"
@@ -153,6 +186,8 @@ def test_upload_response_and_assessment_items_include_provenance_fields(
     assert response["is_synthetic"] is expected_synthetic
     assert response["items"][0]["is_synthetic"] is expected_synthetic
     assert response["items"][0]["confidence"] is None
+    assert response["items"][0]["estimated_stock_after_7_days"] == 5
+    assert response["items"][0]["estimated_stock_after_14_days"] == 0
 
 
 def test_metrics_api_withholds_legacy_accuracy(monkeypatch, tmp_path):

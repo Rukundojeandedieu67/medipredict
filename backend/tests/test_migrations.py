@@ -58,6 +58,10 @@ def test_provenance_migration_backfills_and_downgrades_without_losing_rows(tmp_p
                 for column in connection.execute(f"PRAGMA table_info({table})").fetchall()
             }
             assert {"is_synthetic", "data_source"}.issubset(names)
+        alert_table = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='alert_notification_states'"
+        ).fetchone()
+        assert alert_table is not None
 
     command.downgrade(copy_config, "0001_baseline")
     with sqlite3.connect(database_copy) as connection:
@@ -69,3 +73,6 @@ def test_provenance_migration_backfills_and_downgrades_without_losing_rows(tmp_p
             }
             assert "is_synthetic" not in names
             assert "data_source" not in names
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='alert_notification_states'"
+        ).fetchone() is None

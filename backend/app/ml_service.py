@@ -1,6 +1,7 @@
 """Model loading, feature mapping, and stock risk inference."""
 import json
 import logging
+import math
 from functools import lru_cache
 
 import joblib
@@ -79,10 +80,33 @@ def get_model_bundle() -> tuple[object | None, dict | None]:
 def get_model():
     return get_model_bundle()[0]
 
-def risk_from_lead_time(days: float) -> str:
+def risk_from_lead_time(days: float | None) -> str:
+    if days is None or not math.isfinite(days):
+        return "UNKNOWN"
     if days < 7: return "CRITICAL"
     if days <= 14: return "MODERATE"
     return "STABLE"
+
+
+def estimate_stock_after_days(
+    stock_units: object,
+    daily_consumption: object,
+    days: int,
+) -> float | None:
+    """Project remaining stock at a constant reported consumption rate, without receipts."""
+    try:
+        stock = float(stock_units)
+        consumption = float(daily_consumption)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(stock) or stock < 0 or days < 0:
+        return None
+    if stock == 0:
+        return 0.0
+    if not math.isfinite(consumption) or consumption <= 0:
+        return None
+    return round(max(0.0, stock - consumption * days), 1)
+
 
 def parse_is_synthetic(value: object) -> bool:
     normalized = str(value).strip().casefold()
@@ -94,7 +118,6 @@ def parse_is_synthetic(value: object) -> bool:
 
 
 def infer(records: list[dict], data_source: str | None = None) -> list[dict]:
-    model, metadata = get_model_bundle()
     features = pd.DataFrame([{
         "end_of_month_stock_units": float(r.get("stock_units", r.get("end_of_month_stock_units", 0))),
         "avg_daily_consumption_units": float(r.get("daily_consumption", r.get("avg_daily_consumption_units", 0))),
@@ -105,26 +128,39 @@ def infer(records: list[dict], data_source: str | None = None) -> list[dict]:
         "medicine_code": r.get("medicine_code", "UNKNOWN"), "district": r.get("district", "Unknown"),
         "facility_type": r.get("facility_type", "Health Center")
     } for r in records])
-    lead_times = [float(row["end_of_month_stock_units"]) / max(float(row["avg_daily_consumption_units"]), 0.01) for _, row in features.iterrows()]
-    if model is not None and metadata is not None:
-        labels = model.predict(features)
-        confidence = [None for _ in labels]
-        method = "ml_model"
-        model_version = metadata.get("model_version")
-        if not isinstance(model_version, str):
-            model_version = None
-        model_validated = True
-        confidence_note = "Calibrated confidence is unavailable for this model artifact."
-    else:
-        labels = [risk_from_lead_time(days) for days in lead_times]
-        confidence = [None for _ in labels]
-        method = "rule_based_fallback"
-        model_version = None
-        model_validated = False
-        confidence_note = (
-            "Rule-based days-of-cover estimate using fixed thresholds (<7, 7-14, >14 days). "
-            "Not a probability."
+    lead_times = [
+        (
+            float(row["end_of_month_stock_units"])
+            / float(row["avg_daily_consumption_units"])
+            if (
+                math.isfinite(float(row["end_of_month_stock_units"]))
+                and math.isfinite(float(row["avg_daily_consumption_units"]))
+                and float(row["avg_daily_consumption_units"]) > 0
+            )
+            else None
         )
+        for _, row in features.iterrows()
+    ]
+    labels = [
+        (
+            "CRITICAL"
+            if stock <= 0
+            or str(record.get("stockout_flag", "")).strip().casefold() == "true"
+            or float(record.get("stock_out_days", 0) or 0) > 0
+            else risk_from_lead_time(days)
+        )
+        for record, stock, days in zip(
+            records, features["end_of_month_stock_units"], lead_times
+        )
+    ]
+    confidence = [None for _ in labels]
+    method = "rule_based_fallback"
+    model_version = None
+    model_validated = False
+    confidence_note = (
+        "Stock-cover estimate uses reported stock and average daily consumption. "
+        "Assumes constant consumption and no incoming receipts; not a probability."
+    )
 
     assessed = []
     for i, record in enumerate(records):
@@ -132,7 +168,17 @@ def infer(records: list[dict], data_source: str | None = None) -> list[dict]:
         source = data_source or ("synthetic" if is_synthetic else "real")
         assessed.append({
             **record,
-            "lead_time_days": round(lead_times[i], 1),
+            "lead_time_days": round(lead_times[i], 1) if lead_times[i] is not None else None,
+            "estimated_stock_after_7_days": estimate_stock_after_days(
+                features.iloc[i]["end_of_month_stock_units"],
+                features.iloc[i]["avg_daily_consumption_units"],
+                7,
+            ),
+            "estimated_stock_after_14_days": estimate_stock_after_days(
+                features.iloc[i]["end_of_month_stock_units"],
+                features.iloc[i]["avg_daily_consumption_units"],
+                14,
+            ),
             "risk_level": str(labels[i]),
             "confidence": confidence[i],
             "method": method,

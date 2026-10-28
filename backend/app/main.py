@@ -16,11 +16,19 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import Base, engine, get_db
 from . import models
-from .ml_service import infer, load_metrics, parse_is_synthetic, risk_from_lead_time
+from .alerts import build_stock_alerts, dispatch_stock_alerts
+from .ml_service import (
+    estimate_stock_after_days,
+    infer,
+    load_metrics,
+    parse_is_synthetic,
+    risk_from_lead_time,
+)
 from .schemas.api import (
     CsvAssessmentItem,
     CsvAssessmentResult,
     CsvValidationReport,
+    StockAlert,
     Summary,
     RiskRecord,
     TransferCandidate,
@@ -65,9 +73,9 @@ def provenance_summary(rows: list[dict]) -> tuple[str | None, bool | None]:
 @app.get("/api/v1/inventory/summary", response_model=Summary)
 async def inventory_summary(db: Session = Depends(get_db)):
     rows = load_rows()
-    if not rows: return Summary(facilities=0,districts=0,medicines=0,critical=0,moderate=0,stable=0,stock_units=0,reporting_date="—",data_source=None,is_synthetic=None)
+    if not rows: return Summary(facilities=0,districts=0,medicines=0,critical=0,moderate=0,stable=0,unknown=0,stock_units=0,reporting_date="—",data_source=None,is_synthetic=None)
     data_source, is_synthetic = provenance_summary(rows)
-    return Summary(facilities=len({r["facility"] for r in rows}), districts=len({r["district"] for r in rows}), medicines=len({r["medicine_code"] for r in rows}), critical=sum(r["risk_level"]=="CRITICAL" for r in rows), moderate=sum(r["risk_level"]=="MODERATE" for r in rows), stable=sum(r["risk_level"]=="STABLE" for r in rows), stock_units=int(sum(r["stock_units"] for r in rows)), reporting_date=str(max(r["reporting_date"] for r in rows)),data_source=data_source,is_synthetic=is_synthetic)
+    return Summary(facilities=len({r["facility"] for r in rows}), districts=len({r["district"] for r in rows}), medicines=len({r["medicine_code"] for r in rows}), critical=sum(r["risk_level"]=="CRITICAL" for r in rows), moderate=sum(r["risk_level"]=="MODERATE" for r in rows), stable=sum(r["risk_level"]=="STABLE" for r in rows), unknown=sum(r["risk_level"]=="UNKNOWN" for r in rows), stock_units=int(sum(r["stock_units"] for r in rows)), reporting_date=str(max(r["reporting_date"] for r in rows)),data_source=data_source,is_synthetic=is_synthetic)
 
 @app.get("/api/v1/predictions/risk-register", response_model=list[RiskRecord])
 async def risk_register(risk: str | None = Query(default=None), district: str | None = Query(default=None), search: str | None = Query(default=None), limit: int = Query(default=500, ge=1, le=5000)):
@@ -75,7 +83,21 @@ async def risk_register(risk: str | None = Query(default=None), district: str | 
     if risk: rows = [r for r in rows if r["risk_level"] == risk.upper()]
     if district: rows = [r for r in rows if r["district"].casefold() == district.casefold()]
     if search: rows = [r for r in rows if search.casefold() in (r["facility"]+r["medicine"]+r["district"]).casefold()]
-    return sorted(rows, key=lambda r: (0 if r["risk_level"]=="CRITICAL" else 1 if r["risk_level"]=="MODERATE" else 2, r["lead_time_days"]))[:limit]
+    return sorted(rows, key=lambda r: (0 if r["risk_level"]=="CRITICAL" else 1 if r["risk_level"]=="MODERATE" else 2 if r["risk_level"]=="STABLE" else 3, r["lead_time_days"] if r["lead_time_days"] is not None else float("inf")))[:limit]
+
+@app.get("/api/v1/alerts", response_model=list[StockAlert])
+async def stock_alerts():
+    return build_stock_alerts(load_rows())
+
+@app.post("/api/v1/alerts/dispatch")
+def dispatch_alert_notifications(
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Alert notification dispatch")
+    rows = load_rows()
+    alerts = build_stock_alerts(rows)
+    return dispatch_stock_alerts(db, rows, alerts)
 
 def _validation_config() -> ValidationConfig:
     return ValidationConfig(
@@ -131,20 +153,26 @@ def _assessment_result(
 
     items = []
     confidence_note = (
-        "Rule-based days-of-cover estimate using fixed thresholds (<7, 7-14, >14 days). "
-        "Not a probability."
+        "Stock-cover estimate uses reported stock and average daily consumption. "
+        "Assumes constant consumption and no incoming receipts; not a probability."
     )
     for _, row in frame.iterrows():
         stock = float(row["stock_on_hand"])
         consumed = float(row["units_consumed"])
         lead_time = stock / consumed if consumed > 0 else None
-        risk = risk_from_lead_time(lead_time) if lead_time is not None else "STABLE"
-        synthetic = parse_is_synthetic(row["is_synthetic"])
+        stock_after_7_days = estimate_stock_after_days(stock, consumed, 7)
+        stock_after_14_days = estimate_stock_after_days(stock, consumed, 14)
         explicit_stockout = (
             parse_is_synthetic(row["stockout_flag"])
-            if "stockout_flag" in frame.columns
-            else stock == 0
+            if "stockout_flag" in frame.columns and row["stockout_flag"].strip()
+            else False
         )
+        risk = (
+            "CRITICAL" if stock <= 0 or explicit_stockout
+            else risk_from_lead_time(lead_time)
+        )
+        synthetic = parse_is_synthetic(row["is_synthetic"])
+        explicit_stockout = explicit_stockout or stock == 0
         items.append(
             CsvAssessmentItem(
                 facility_id=row["facility_id"].strip(),
@@ -155,6 +183,8 @@ def _assessment_result(
                 units_received=float(row["units_received"]),
                 stockout_flag=explicit_stockout,
                 lead_time_days=lead_time,
+                estimated_stock_after_7_days=stock_after_7_days,
+                estimated_stock_after_14_days=stock_after_14_days,
                 risk_level=risk,
                 confidence=None,
                 confidence_note=confidence_note,
@@ -185,6 +215,7 @@ def _assessment_result(
         critical=sum(item.risk_level == "CRITICAL" for item in items),
         moderate=sum(item.risk_level == "MODERATE" for item in items),
         stable=sum(item.risk_level == "STABLE" for item in items),
+        unknown=sum(item.risk_level == "UNKNOWN" for item in items),
         method="rule_based_fallback",
         model_version=None,
         model_validated=False,
@@ -220,9 +251,9 @@ async def validate_csv(
     return _validation_report(frame, purpose)
 
 
-def _require_admin(api_key: str | None) -> None:
+def _require_admin(api_key: str | None, *, operation: str = "Training upload") -> None:
     if not settings.admin_api_key:
-        raise HTTPException(503, "Training upload is disabled: admin API key is not configured.")
+        raise HTTPException(503, f"{operation} is disabled: admin API key is not configured.")
     if api_key is None or not hmac.compare_digest(api_key, settings.admin_api_key):
         raise HTTPException(403, "Admin API key is missing or invalid.")
 
@@ -292,8 +323,8 @@ async def transfer_recommendations():
     for row in rows: groups.setdefault(row["medicine_code"], []).append(row)
     recommendations = []
     for _, items in groups.items():
-        donors = sorted([r for r in items if r["lead_time_days"] > 30], key=lambda r: -r["lead_time_days"])
-        recipients = sorted([r for r in items if r["lead_time_days"] < 14], key=lambda r: r["lead_time_days"])
+        donors = sorted([r for r in items if r["lead_time_days"] is not None and r["lead_time_days"] > 30], key=lambda r: -r["lead_time_days"])
+        recipients = sorted([r for r in items if r["lead_time_days"] is not None and r["lead_time_days"] < 14], key=lambda r: r["lead_time_days"])
         for recipient, donor in zip(recipients, donors):
             if donor["facility"] == recipient["facility"]: continue
             units = max(0, int(min(donor["stock_units"] - donor["daily_consumption"]*30, recipient["daily_consumption"]*14-recipient["stock_units"])))

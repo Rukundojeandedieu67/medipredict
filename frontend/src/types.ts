@@ -5,6 +5,7 @@ export interface Summary {
   critical: number;
   moderate: number;
   stable: number;
+  unknown: number;
   stock_units: number;
   reporting_date: string;
   data_source: "real" | "synthetic" | "uploaded" | null;
@@ -19,13 +20,15 @@ export interface RiskRecord {
   medicine: string;
   stock_units: number;
   daily_consumption: number;
-  lead_time_days: number;
+  lead_time_days: number | null;
+  estimated_stock_after_7_days: number | null;
+  estimated_stock_after_14_days: number | null;
   risk_level: string;
   confidence: number | null;
   confidence_note: string;
-  method: "ml_model" | "rule_based_fallback";
-  model_version: string | null;
-  model_validated: boolean;
+  method: "rule_based_fallback";
+  model_version: null;
+  model_validated: false;
   data_source: "real" | "synthetic" | "uploaded";
   is_synthetic: boolean;
   under5_population: number;
@@ -68,6 +71,7 @@ export interface UploadResult {
   critical: number;
   moderate: number;
   stable: number;
+  unknown: number;
   method: "rule_based_fallback";
   model_version: string | null;
   model_validated: boolean;
@@ -76,6 +80,26 @@ export interface UploadResult {
   confidence_note: string;
   validation: CsvValidationReport;
   items: CsvAssessmentItem[];
+}
+
+export interface StockAlert {
+  alert_id: string;
+  alert_type: "stockout" | "critical_stock" | "low_stock" | "cover_unavailable" | "invalid_data";
+  severity: "critical" | "warning";
+  facility: string;
+  district: string;
+  medicine: string;
+  medicine_code: string;
+  reporting_date: string;
+  stock_units: number | null;
+  daily_consumption: number | null;
+  lead_time_days: number | null;
+  estimated_stock_after_7_days: number | null;
+  estimated_stock_after_14_days: number | null;
+  risk_level: string;
+  data_source: "real" | "synthetic" | "uploaded";
+  is_synthetic: boolean;
+  message: string;
 }
 
 export interface ValidationIssue {
@@ -113,6 +137,8 @@ export interface CsvAssessmentItem {
   units_received: number;
   stockout_flag: boolean;
   lead_time_days: number | null;
+  estimated_stock_after_7_days: number | null;
+  estimated_stock_after_14_days: number | null;
   risk_level: string;
   confidence: number | null;
   confidence_note: string;

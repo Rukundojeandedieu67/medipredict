@@ -8,6 +8,7 @@ class Summary(BaseModel):
     critical: int
     moderate: int
     stable: int
+    unknown: int = 0
     stock_units: int
     reporting_date: str
     data_source: str | None = None
@@ -23,13 +24,15 @@ class RiskRecord(BaseModel):
     medicine: str
     stock_units: float
     daily_consumption: float
-    lead_time_days: float
+    lead_time_days: float | None
+    estimated_stock_after_7_days: float | None
+    estimated_stock_after_14_days: float | None
     risk_level: str
     confidence: float | None
     confidence_note: str
-    method: str
-    model_version: str | None
-    model_validated: bool
+    method: Literal["rule_based_fallback"]
+    model_version: None
+    model_validated: Literal[False]
     data_source: str
     is_synthetic: bool
     under5_population: int
@@ -81,6 +84,8 @@ class CsvAssessmentItem(BaseModel):
     units_received: float
     stockout_flag: bool
     lead_time_days: float | None
+    estimated_stock_after_7_days: float | None
+    estimated_stock_after_14_days: float | None
     risk_level: str
     confidence: float | None
     confidence_note: str
@@ -102,6 +107,7 @@ class CsvAssessmentResult(BaseModel):
     critical: int
     moderate: int
     stable: int
+    unknown: int = 0
     method: Literal["rule_based_fallback"]
     model_version: None
     model_validated: Literal[False]
@@ -133,6 +139,25 @@ class TransferCandidate(BaseModel):
     recipient_lead_time_days: float
     data_source: str
     is_synthetic: bool
+
+class StockAlert(BaseModel):
+    alert_id: str
+    alert_type: Literal["stockout", "critical_stock", "low_stock", "cover_unavailable", "invalid_data"]
+    severity: Literal["critical", "warning"]
+    facility: str
+    district: str
+    medicine: str
+    medicine_code: str
+    reporting_date: str
+    stock_units: float | None
+    daily_consumption: float | None
+    lead_time_days: float | None
+    estimated_stock_after_7_days: float | None
+    estimated_stock_after_14_days: float | None
+    risk_level: str
+    data_source: str
+    is_synthetic: bool
+    message: str
 
 class FeatureImportance(BaseModel):
     feature: str
