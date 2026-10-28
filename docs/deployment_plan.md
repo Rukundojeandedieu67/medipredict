@@ -171,6 +171,19 @@ Use a distinct application DB role for event insertion with `SELECT`/`INSERT` on
 
 **Recommendation: use the existing root [Dockerfile](../Dockerfile)** with repository root as the build context so the backend package, migrations, and shared `ml/` source are available. The [docker-compose.yml](../docker-compose.yml) and [frontend/Dockerfile](../frontend/Dockerfile) are local/container options; Vercel should build the frontend as a static Vite project instead of deploying the Nginx container.
 
+#### Render Dockerfile path
+
+The root `Dockerfile` exists at the repository root. If Render reports `failed to read dockerfile: open Dockerfile: no such file or directory`, its configured build context/root directory does not include that file, or the deployed branch/commit does not contain it. For this repository's root Dockerfile, configure the Render service as follows:
+
+| Render setting | Value |
+|---|---|
+| Root Directory | Leave blank (repository root); do not set it to `backend` or `frontend`. |
+| Dockerfile Path | `./Dockerfile` |
+| Docker Build Context Directory | `.` (repository root), if shown as a separate setting. |
+| Branch | The branch containing the committed root `Dockerfile` and `.dockerignore`. |
+
+Save the settings and trigger a new deploy. If the Render service is intentionally rooted in a subdirectory, either change its root back to the repository root or set a Dockerfile path and context that are both valid relative to that root; the current root Dockerfile also needs the root-level `backend/`, `config/`, `ml/`, and requirements files, so simply pointing at it from a subdirectory is not sufficient. Check that the selected branch has the Dockerfile committed and that `.dockerignore` does not exclude it.
+
 - Image build: the current root Dockerfile uses `python:3.12-slim` and installs [backend requirements](../backend/requirements.txt) and [ml_engine requirements](../ml_engine/requirements.txt). Review/pin the base image and dependencies for production. Do not copy `.env`, databases, `datasets/uploads`, training inputs, or developer virtual environments into the image.
 - Web start command: override the Dockerfile's fixed `--port 8000` command in Render with `python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT` (or make the image honor `PORT` while preserving local Compose's port mapping). Confirm the service binds to Render's assigned port.
 - Migration command: a controlled release/one-off job invoking `alembic upgrade head` against the direct Neon URL before new API code is promoted.
@@ -445,6 +458,7 @@ These are intentional decision gates, not assumptions. Please answer before impl
 - **Files changed:** `docs/deployment_plan.md` (deployment sequence, local/cloud boundary, and existing-container facts); `README.md` (link to this plan and explicit local-mode continuity).
 - **Code/schema/database changes:** None. No accounts created, deployments made, or files uploaded.
 - **Commands run:**
+  - `Test-Path .\Dockerfile; Get-Item .\Dockerfile | Select-Object FullName,Length`: confirmed the file exists at `C:\Users\ocaen\projects\nisrhackaton\Dockerfile` (934 bytes).
   - `npm.cmd run build` from the repository root: failed with `ENOENT` because the frontend `package.json` is under `frontend/`.
   - `Push-Location frontend; npm.cmd run build; $buildExitCode = $LASTEXITCODE; Pop-Location; exit $buildExitCode`: passed. Output: `tsc -b && vite build`; Vite `6.4.4`; `42 modules transformed`; build completed in `1.32s`; exit code `0`.
   - `& .\backend\.venv\Scripts\python.exe -m pytest backend\tests`: passed; `122 passed in 88.37s`.
