@@ -25,8 +25,8 @@ function AlertsView({ alerts, loading }: { alerts: StockAlert[]; loading: boolea
     <div className="section-intro"><div><div className="eyebrow"><span className="eyebrow-line" />STOCK MONITORING</div><h1>Stock alerts<span className="heading-period">.</span></h1><p className="page-subtitle">Current reported stock-out, low-cover, and missing-consumption warnings.</p></div><span className="result-count">{formatNumber(alerts.length)} active alerts</span></div>
     <div className="notice-card"><span className="notice-icon"><Icon name="alert" size={18} /></span><div><strong>Stock availability estimates</strong><p>7- and 14-day remaining stock is estimated from current stock and reported average daily consumption, assuming a constant rate and no incoming receipts. This is a simple projection, not a trained forecast. Confirm stock, consumption, and expected deliveries before acting.</p></div></div>
     <div className="panel">
-      {alerts.length ? <div className="table-wrap"><table className="full-table"><thead><tr><th>Priority</th><th>Facility / district</th><th>Medicine</th><th>Available</th><th>Daily use</th><th>After 7 days</th><th>After 14 days</th><th>Cover</th><th>Reported</th><th>Data</th></tr></thead><tbody>
-        {alerts.map((alert) => <tr key={alert.alert_id}><td><span className={`risk-badge ${alert.severity}`}>{alert.alert_type.replaceAll("_", " ")}</span></td><td><strong>{alert.facility}</strong><span>{alert.district}</span></td><td><strong>{alert.medicine}</strong><span>{alert.medicine_code}</span></td><td>{formatNumber(alert.stock_units)} <small>units</small></td><td>{formatNumber(alert.daily_consumption)} <small>units/day</small></td><td>{formatNumber(alert.estimated_stock_after_7_days)} <small>units</small></td><td>{formatNumber(alert.estimated_stock_after_14_days)} <small>units</small></td><td>{formatDays(alert.lead_time_days)}</td><td>{alert.reporting_date}</td><td><span className={`assessment-badge ${alert.is_synthetic ? "synthetic-badge" : "source-badge"}`}>{alert.is_synthetic ? "Synthetic" : alert.data_source === "uploaded" ? "Uploaded" : "Real"}</span><span className="alert-message">{alert.message}</span></td></tr>)}
+      {alerts.length ? <div className="table-wrap"><table className="full-table"><thead><tr><th>Priority</th><th>Facility / district</th><th>Medicine</th><th>Available</th><th>Daily use</th><th>Stock projection</th><th>Cover</th><th>Reported</th><th>Data</th></tr></thead><tbody>
+        {alerts.map((alert) => <tr key={alert.alert_id}><td><span className={`risk-badge ${alert.severity}`}>{alert.alert_type.replaceAll("_", " ")}</span></td><td><strong>{alert.facility}</strong><span>{alert.district}</span></td><td><strong>{alert.medicine}</strong><span>{alert.medicine_code}</span></td><td>{formatNumber(alert.stock_units)} <small>units</small></td><td>{formatNumber(alert.daily_consumption)} <small>units/day</small></td><td><ProjectionChart current={alert.stock_units} after7Days={alert.estimated_stock_after_7_days} after14Days={alert.estimated_stock_after_14_days} label={`${alert.facility} ${alert.medicine}`} /></td><td>{formatDays(alert.lead_time_days)}</td><td>{alert.reporting_date}</td><td><span className={`assessment-badge ${alert.is_synthetic ? "synthetic-badge" : "source-badge"}`}>{alert.is_synthetic ? "Synthetic" : alert.data_source === "uploaded" ? "Uploaded" : "Real"}</span><span className="alert-message">{alert.message}</span></td></tr>)}
       </tbody></table></div> : <EmptyState>{loading ? "Loading stock alerts…" : "No active stock warnings in the latest reported snapshot."}</EmptyState>}
       <div className="table-bottom"><span>Alerts use the latest available row per facility and medicine.</span><span>Not a forecast</span></div>
     </div>
@@ -79,6 +79,75 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 function RiskBadge({ risk }: { risk: string }) {
   const level = risk.toLowerCase();
   return <span className={`risk-badge ${level}`}>{risk.toLowerCase()}</span>;
+}
+
+function ProjectionChart({
+  current,
+  after7Days,
+  after14Days,
+  label,
+}: {
+  current: number | null;
+  after7Days: number | null;
+  after14Days: number | null;
+  label: string;
+}) {
+  const values = [current, after7Days, after14Days];
+  const isValidValue = (value: number | null): value is number =>
+    value !== null && Number.isFinite(value) && value >= 0;
+  const finiteValues = values.filter(
+    isValidValue,
+  );
+  const maxValue = Math.max(...finiteValues, 1);
+  const x = [34, 112, 190];
+  const baseline = 62;
+  const chartHeight = 46;
+  const points = values.map((value, index) => ({
+    x: x[index],
+    y:
+      isValidValue(value)
+        ? baseline - (value / maxValue) * chartHeight
+        : null,
+  }));
+  const accessibleValues = values
+    .map((value, index) => `${["current", "7 days", "14 days"][index]}: ${isValidValue(value) ? `${formatNumber(value)} units` : "not available"}`)
+    .join(", ");
+
+  return <div className="projection-chart">
+    <span className="projection-chart-title">Estimated stock (units)</span>
+    <svg
+      role="img"
+      aria-label={`${label} stock projection. ${accessibleValues}. Future values assume constant consumption and no receipts.`}
+      viewBox="0 0 224 98"
+      preserveAspectRatio="xMinYMin meet"
+    >
+      <line className="chart-axis" x1="20" y1={baseline} x2="204" y2={baseline} />
+      <line className="chart-grid" x1="20" y1="39" x2="204" y2="39" />
+      {points.slice(0, -1).map((point, index) => {
+        const nextPoint = points[index + 1];
+        return point.y !== null && nextPoint.y !== null
+          ? <line key={index} className="projection-line" x1={point.x} y1={point.y} x2={nextPoint.x} y2={nextPoint.y} />
+          : null;
+      })}
+      {points.map((point, index) => {
+        const value = values[index];
+        const valueLabel = isValidValue(value) ? formatNumber(value) : "n/a";
+        return <g key={index}>
+          {point.y !== null && <circle
+            className={index === 0 ? "projection-point current" : "projection-point future"}
+            cx={point.x}
+            cy={point.y}
+            r="4"
+          />}
+          <text className="projection-value" x={point.x} y="79" textAnchor="middle">{valueLabel}</text>
+          <text className="projection-day" x={point.x} y="94" textAnchor="middle">
+            {["Now", "7d", "14d"][index]}
+          </text>
+        </g>;
+      })}
+    </svg>
+    <span className="projection-note">Now is reported; later values are estimates with no receipts included.</span>
+  </div>;
 }
 
 function StatCard({ label, value, note, icon, tone }: { label: string; value: string; note: string; icon: IconName; tone: string }) {
@@ -314,7 +383,7 @@ function RiskRegister({ rows, query, setQuery, riskFilter, setRiskFilter, loadin
     <div className="section-intro"><div><div className="eyebrow"><span className="eyebrow-line" />MONITORING</div><h1>Risk register<span className="heading-period">.</span></h1><p className="page-subtitle">Review medicine availability signals by facility and district.</p></div><span className="result-count">{formatNumber(rows.length)} records</span></div>
     <div className="panel">
       <div className="table-toolbar"><label className="search-box"><Icon name="search" size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search facility, medicine, or district" /></label><select aria-label="Filter by risk level" value={riskFilter} onChange={(event) => setRiskFilter(event.target.value)}><option>All risk levels</option><option>Critical</option><option>Moderate</option><option>Stable</option><option>Unknown</option></select></div>
-      <div className="table-wrap"><table className="full-table"><thead><tr><th>Facility</th><th>District</th><th>Medicine</th><th>Stock now</th><th>Daily use</th><th>After 7 days</th><th>After 14 days</th><th>Stock cover</th><th>Risk level</th><th>Confidence</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.facility}-${row.medicine_code}-${index}`}><td><strong>{row.facility}</strong><span>{row.province}</span></td><td>{row.district}</td><td><strong>{row.medicine}</strong><span>{row.medicine_code}</span></td><td>{formatNumber(row.stock_units)} <small>units</small></td><td>{formatNumber(row.daily_consumption)} <small>units</small></td><td>{formatNumber(row.estimated_stock_after_7_days)} <small>units</small></td><td>{formatNumber(row.estimated_stock_after_14_days)} <small>units</small></td><td>{formatDays(row.lead_time_days)}</td><td><RiskBadge risk={row.risk_level} /><AssessmentBadges item={row} /></td><td title={row.confidence_note}>{formatConfidence(row.confidence)}</td></tr>)}</tbody></table>
+      <div className="table-wrap"><table className="full-table"><thead><tr><th>Facility</th><th>District</th><th>Medicine</th><th>Stock now</th><th>Daily use</th><th>Stock projection</th><th>Stock cover</th><th>Risk level</th><th>Confidence</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${row.facility}-${row.medicine_code}-${index}`}><td><strong>{row.facility}</strong><span>{row.province}</span></td><td>{row.district}</td><td><strong>{row.medicine}</strong><span>{row.medicine_code}</span></td><td>{formatNumber(row.stock_units)} <small>units</small></td><td>{formatNumber(row.daily_consumption)} <small>units</small></td><td><ProjectionChart current={row.stock_units} after7Days={row.estimated_stock_after_7_days} after14Days={row.estimated_stock_after_14_days} label={`${row.facility} ${row.medicine}`} /></td><td>{formatDays(row.lead_time_days)}</td><td><RiskBadge risk={row.risk_level} /><AssessmentBadges item={row} /></td><td title={row.confidence_note}>{formatConfidence(row.confidence)}</td></tr>)}</tbody></table>
         {!rows.length && <EmptyState>{loading ? "Loading risk records…" : "No records match these filters."}</EmptyState>}</div>
       <div className="table-bottom"><span>Showing up to 5,000 records from the API.</span><span>Demonstration data only</span></div>
     </div>
@@ -359,7 +428,7 @@ function UploadView({ result, error, uploading, onSelect }: { result: UploadResu
     <div className="section-intro"><div><div className="eyebrow"><span className="eyebrow-line" />DATA INTAKE</div><h1>Upload facility data<span className="heading-period">.</span></h1><p className="page-subtitle">Run a risk assessment on a facility inventory CSV.</p></div></div>
     <div className="upload-layout"><article className="panel upload-panel"><div className="upload-heading"><span className="upload-symbol"><Icon name="upload" size={23} /></span><div><h2>Assess daily inventory CSV</h2><p>Assessment is in-memory only; it does not save or train.</p></div></div><label className={`dropzone ${uploading ? "is-uploading" : ""}`}><input ref={inputRef} type="file" accept=".csv,text/csv" disabled={uploading} onChange={(event) => handleFile(event.target.files?.[0])} /><span className="drop-icon"><Icon name="file" size={25} /></span><strong>{uploading ? "Assessing file…" : fileName || "Choose a CSV file to assess"}</strong><span>{uploading ? "Please wait while the assessment is generated" : "Select a file from your computer · CSV format"}</span><span className="browse-button">{uploading ? "Working…" : "Browse files"}</span></label>{error && <div className="inline-error" role="alert"><Icon name="alert" size={16} />{error}</div>}<div className="required-fields"><strong>Required CSV columns</strong><p>facility_id, item_id, date (YYYY-MM-DD), stock_on_hand, units_consumed, units_received, is_synthetic (true or false)</p><strong>Optional columns</strong><p>stockout_flag, lead_time_days, reorder_level, facility_type, region</p></div></article>
       <aside className="upload-aside"><div className="eyebrow small">BEFORE YOU UPLOAD</div><ul><li><span><Icon name="check" size={14} /></span>Daily stock and movement quantities must be non-negative.</li><li><span><Icon name="check" size={14} /></span>State is_synthetic as true or false; unknown provenance is rejected.</li><li><span><Icon name="check" size={14} /></span>Assessment warns on short histories; training requires at least 90 records per pair and 12 pairs.</li><li><span><Icon name="check" size={14} /></span>Maximum file size is 20 MB; CSV only.</li></ul><div className="upload-note"><Icon name="alert" size={17} /><p>Assessment uses fixed days-of-cover rules. It is not a trained prediction, and no confidence probability is reported.</p></div></aside></div>
-    {result && <article className="panel upload-results"><div className="panel-heading"><div><div className="eyebrow small">ASSESSMENT COMPLETE</div><h2>Assessment summary</h2></div><span className="success-tag"><Icon name="check" size={14} />Completed</span></div><div className="upload-stat-grid"><div><span>Records received</span><strong>{formatNumber(result.records_received)}</strong></div><div><span>Assessments generated</span><strong>{formatNumber(result.predictions)}</strong></div><div><span>Critical</span><strong className="text-critical">{formatNumber(result.critical)}</strong></div><div><span>Moderate</span><strong className="text-moderate">{formatNumber(result.moderate)}</strong></div><div><span>Stable</span><strong className="text-stable">{formatNumber(result.stable)}</strong></div></div>{result.validation.warnings.length > 0 && <div className="panel-footnote">Validation warnings: {formatNumber(result.validation.total_counts.returned_warnings)} shown of {formatNumber(result.validation.total_counts.warnings)} total.{result.validation.total_counts.warnings_truncated ? " Warning list is capped." : ""}</div>}{result.items.length > 0 && <><div className="table-wrap"><table><thead><tr><th>Facility / item</th><th>Date</th><th>Available stock</th><th>After 7 days</th><th>After 14 days</th><th>Estimated cover</th><th>Risk and method</th><th>Confidence</th></tr></thead><tbody>{result.items.slice(0, 8).map((item: CsvAssessmentItem, index) => <tr key={`${item.facility_id}-${item.item_id}-${index}`}><td>{item.facility_id}<span>{item.item_id}</span></td><td>{item.date}</td><td>{formatNumber(item.stock_on_hand)} <small>units</small></td><td>{formatNumber(item.estimated_stock_after_7_days)} <small>units</small></td><td>{formatNumber(item.estimated_stock_after_14_days)} <small>units</small></td><td>{formatDays(item.lead_time_days)}</td><td><RiskBadge risk={item.risk_level} /><AssessmentBadges item={item} /></td><td title={item.confidence_note}>{formatConfidence(item.confidence)}</td></tr>)}</tbody></table></div><div className="panel-footnote">Projections assume constant reported daily consumption and no incoming receipts. Showing {Math.min(result.items.length, 8)} of {formatNumber(result.predictions)} records. Rule-based estimates are not AI predictions.</div></>}</article>}
+    {result && <article className="panel upload-results"><div className="panel-heading"><div><div className="eyebrow small">ASSESSMENT COMPLETE</div><h2>Assessment summary</h2></div><span className="success-tag"><Icon name="check" size={14} />Assessment complete</span></div><div className="upload-stat-grid"><div><span>Records received</span><strong>{formatNumber(result.records_received)}</strong></div><div><span>Assessments generated</span><strong>{formatNumber(result.predictions)}</strong></div><div><span>Critical</span><strong className="text-critical">{formatNumber(result.critical)}</strong></div><div><span>Moderate</span><strong className="text-moderate">{formatNumber(result.moderate)}</strong></div><div><span>Stable</span><strong className="text-stable">{formatNumber(result.stable)}</strong></div></div>{result.validation.warnings.length > 0 && <div className="panel-footnote">Validation warnings: {formatNumber(result.validation.total_counts.returned_warnings)} shown of {formatNumber(result.validation.total_counts.warnings)} total.{result.validation.total_counts.warnings_truncated ? " Warning list is capped." : ""}</div>}{result.items.length > 0 && <><div className="table-wrap"><table><thead><tr><th>Facility / item</th><th>Date</th><th>Available stock</th><th>Stock projection</th><th>Estimated cover</th><th>Risk and method</th><th>Confidence</th></tr></thead><tbody>{result.items.slice(0, 8).map((item: CsvAssessmentItem, index) => <tr key={`${item.facility_id}-${item.item_id}-${index}`}><td>{item.facility_id}<span>{item.item_id}</span></td><td>{item.date}</td><td>{formatNumber(item.stock_on_hand)} <small>units</small></td><td><ProjectionChart current={item.stock_on_hand} after7Days={item.estimated_stock_after_7_days} after14Days={item.estimated_stock_after_14_days} label={`${item.facility_id} ${item.item_id}`} /></td><td>{formatDays(item.lead_time_days)}</td><td><RiskBadge risk={item.risk_level} /><AssessmentBadges item={item} /></td><td title={item.confidence_note}>{formatConfidence(item.confidence)}</td></tr>)}</tbody></table></div><div className="panel-footnote">Projections assume constant reported daily consumption and no incoming receipts. Showing {Math.min(result.items.length, 8)} of {formatNumber(result.predictions)} records. Rule-based estimates are not AI predictions.</div></>}</article>}
   </section>;
 }
 
