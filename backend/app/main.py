@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -10,12 +10,15 @@ import tempfile
 import uuid
 
 import pandas as pd
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from . import auth
 from .config import settings
-from .database import Base, engine, get_db
+from .database import Base, SessionLocal, engine, get_db
 from . import models
 from .alerts import build_stock_alerts, dispatch_stock_alerts
 from .ml_service import (
@@ -45,6 +48,10 @@ from .schemas.api import (
     CsvAssessmentResult,
     CsvValidationReport,
     DatasetDetail,
+    AuthSessionResponse,
+    AuthUserResponse,
+    CreateUserRequest,
+    LoginRequest,
     ProvenanceResponse,
     StockAlert,
     Summary,
@@ -113,11 +120,232 @@ async def lifespan(app: FastAPI):
 
     if settings.database_enabled and engine.dialect.name == "sqlite":
         Base.metadata.create_all(bind=engine)
+    if settings.database_enabled and (
+        settings.auth_initial_admin_email or settings.auth_initial_admin_password
+    ):
+        if not auth.auth_is_configured():
+            raise RuntimeError(
+                "A database and a MEDIPREDICT_AUTH_SECRET_KEY of at least 32 "
+                "characters are required to bootstrap the initial admin."
+            )
+        auth.ensure_initial_admin(SessionLocal)
     yield
 
 
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def protect_api(request: Request, call_next):
+    path = request.url.path
+    public_paths = {
+        "/api/v1/health",
+        "/api/v1/auth/setup",
+        "/api/v1/auth/login",
+    }
+    if not path.startswith("/api/v1/") or path in public_paths or request.method == "OPTIONS":
+        response = await call_next(request)
+    else:
+        if not auth.auth_is_configured():
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "Authentication is unavailable. Set "
+                        "MEDIPREDICT_DATABASE_ENABLED=true and configure "
+                        "MEDIPREDICT_AUTH_SECRET_KEY to at least 32 characters."
+                    )
+                },
+            )
+
+        origin = request.headers.get("origin")
+        if origin and origin not in settings.allowed_origins:
+            return JSONResponse(status_code=403, content={"detail": "Origin is not allowed."})
+
+        try:
+            principal = auth.authenticate_session(
+                request.cookies.get(auth.SESSION_COOKIE), SessionLocal
+            )
+        except SQLAlchemyError:
+            logger.exception("Could not verify the API session.")
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Authentication service is temporarily unavailable."},
+            )
+        if principal is None:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Sign in to continue."},
+            )
+        request.state.auth_user = principal
+
+        if request.method not in {"GET", "HEAD"}:
+            csrf_token = request.headers.get("x-csrf-token")
+            if not csrf_token or not hmac.compare_digest(
+                csrf_token, principal.csrf_token
+            ):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "A valid CSRF token is required."},
+                )
+        response = await call_next(request)
+
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if path.startswith("/api/v1/auth/"):
+        response.headers["Cache-Control"] = "no-store"
+    if settings.auth_cookie_secure and request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
+
+
+def _auth_user_response(user: models.AuthUser) -> AuthUserResponse:
+    return AuthUserResponse(id=user.id, email=user.email, role=user.role)
+
+
+def _current_user(request: Request) -> auth.AuthPrincipal:
+    principal = getattr(request.state, "auth_user", None)
+    if principal is None:
+        raise HTTPException(401, "Sign in to continue.")
+    return principal
+
+
+def _require_admin_user(
+    principal: auth.AuthPrincipal = Depends(_current_user),
+) -> auth.AuthPrincipal:
+    if principal.role != "admin":
+        raise HTTPException(403, "Administrator access is required.")
+    return principal
+
+
+@app.get("/api/v1/auth/setup")
+async def auth_setup():
+    return {"configured": auth.auth_is_configured()}
+
+
+@app.post("/api/v1/auth/login", response_model=AuthSessionResponse)
+async def login(
+    credentials: LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    if not auth.auth_is_configured():
+        raise HTTPException(
+            503,
+            "Authentication is not configured. Configure the database and session secret.",
+        )
+    try:
+        email = auth.normalize_email(credentials.email)
+    except ValueError:
+        email = ""
+    user = db.query(models.AuthUser).filter_by(email=email).first() if email else None
+    if user is None:
+        auth.verify_password(credentials.password, auth.DUMMY_PASSWORD_HASH)
+        raise HTTPException(401, "Email or password is incorrect.")
+
+    now = datetime.now(timezone.utc)
+    locked_until = user.locked_until
+    if locked_until is not None and locked_until.tzinfo is None:
+        locked_until = locked_until.replace(tzinfo=timezone.utc)
+    password_matches = auth.verify_password(credentials.password, user.password_hash)
+    if (
+        not password_matches
+        or not user.is_active
+        or (locked_until is not None and locked_until > now)
+    ):
+        if user.is_active and (locked_until is None or locked_until <= now):
+            user.failed_login_attempts += 1
+            if user.failed_login_attempts >= auth.MAX_LOGIN_ATTEMPTS:
+                user.locked_until = now.replace(tzinfo=None) + timedelta(
+                    seconds=auth.LOGIN_LOCK_SECONDS
+                )
+            db.commit()
+        raise HTTPException(401, "Email or password is incorrect.")
+
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    db.commit()
+    session_token, csrf_token, _session = auth.create_session(user, db)
+    db.commit()
+    response.set_cookie(
+        key=auth.SESSION_COOKIE,
+        value=session_token,
+        max_age=auth.SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="strict",
+        path="/",
+    )
+    return AuthSessionResponse(
+        user=_auth_user_response(user),
+        csrf_token=csrf_token,
+    )
+
+
+@app.get("/api/v1/auth/me", response_model=AuthSessionResponse)
+async def current_session(
+    principal: auth.AuthPrincipal = Depends(_current_user),
+):
+    return AuthSessionResponse(
+        user=AuthUserResponse(
+            id=principal.id, email=principal.email, role=principal.role
+        ),
+        csrf_token=principal.csrf_token,
+    )
+
+
+@app.post("/api/v1/auth/logout")
+async def logout(
+    response: Response,
+    db: Session = Depends(get_db),
+    principal: auth.AuthPrincipal = Depends(_current_user),
+):
+    session = db.get(models.AuthSession, principal.session_id)
+    if session is not None and session.revoked_at is None:
+        session.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+    response.delete_cookie(
+        key=auth.SESSION_COOKIE,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="strict",
+        path="/",
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/v1/auth/users", response_model=AuthUserResponse, status_code=201)
+async def create_user(
+    details: CreateUserRequest,
+    db: Session = Depends(get_db),
+    _admin: auth.AuthPrincipal = Depends(_require_admin_user),
+):
+    try:
+        email = auth.normalize_email(details.email)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if db.query(models.AuthUser).filter_by(email=email).first() is not None:
+        raise HTTPException(409, "An account with this email already exists.")
+    user = models.AuthUser(
+        id=uuid.uuid4().hex,
+        email=email,
+        password_hash=auth.hash_password(details.password),
+        role="user",
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "An account with this email already exists.") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Could not create an account for %s.", email)
+        raise HTTPException(503, "The account could not be created.") from exc
+    return _auth_user_response(user)
+
 
 def load_rows() -> list[dict]:
     try:

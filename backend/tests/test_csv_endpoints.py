@@ -6,7 +6,6 @@ import logging
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException, UploadFile
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -148,19 +147,23 @@ def test_validate_endpoint_matches_pure_validator_output():
     assert report.model_dump() == expected
 
 
-def test_http_assess_and_validate_endpoints_return_contract_shapes(tmp_path, monkeypatch):
+def test_http_assess_and_validate_endpoints_return_contract_shapes(
+    tmp_path, monkeypatch, admin_client
+):
     monkeypatch.setattr(main.settings, "uploads_path", tmp_path / "uploads")
     content = _csv()
 
-    with TestClient(main.app) as client:
-        assessment = client.post(
-            "/api/v1/data/assess-csv",
-            files={"file": ("inventory.csv", content, "text/csv")},
-        )
-        validation = client.post(
-            "/api/v1/data/validate-csv?purpose=assessment",
-            files={"file": ("inventory.csv", content, "text/csv")},
-        )
+    client, csrf_headers = admin_client
+    assessment = client.post(
+        "/api/v1/data/assess-csv",
+        files={"file": ("inventory.csv", content, "text/csv")},
+        headers=csrf_headers,
+    )
+    validation = client.post(
+        "/api/v1/data/validate-csv?purpose=assessment",
+        files={"file": ("inventory.csv", content, "text/csv")},
+        headers=csrf_headers,
+    )
 
     assert assessment.status_code == 200
     assessment_json = assessment.json()

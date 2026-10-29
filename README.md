@@ -64,7 +64,7 @@ Do not use the dashboard's outputs or any development results for clinical, proc
 
 To use Aiven PostgreSQL (and Cloudflare R2 once its credentials are available):
 
-1. Copy `backend/.env.example` to `backend/.env` and configure the Aiven connection URL with the values from your database provider. URL-encode special characters in the password. Keep credentials in the ignored `.env` file; never commit them or put them in frontend settings.
+1. Copy `backend/.env.example` to `backend/.env`. Configure the Aiven URL if using PostgreSQL, then set a random `MEDIPREDICT_AUTH_SECRET_KEY` (at least 32 characters) and one-time `MEDIPREDICT_AUTH_INITIAL_ADMIN_EMAIL` / `MEDIPREDICT_AUTH_INITIAL_ADMIN_PASSWORD` (at least 12 characters). For local HTTP development, keep `MEDIPREDICT_AUTH_COOKIE_SECURE=false`; production must use HTTPS and set it to `true`. Docker Compose defaults this cookie flag to false for its local HTTP ports; override it to true when deployed behind HTTPS. URL-encode special characters in database passwords. Keep all credentials in the ignored `.env` file; never commit them or put them in frontend settings.
 2. Local file storage is the default. To use Cloudflare R2, create a bucket and S3 API token, configure the R2 settings in the ignored `backend/.env`, set `MEDIPREDICT_DASHBOARD_DATA_KEY` to the dashboard CSV object key, and then select `MEDIPREDICT_STORAGE_BACKEND=s3`. In hosted Docker deployments, the dashboard CSV included in the image seeds and verifies a missing object on first read.
 3. If the Aiven database is new and empty, first confirm the connection URL points to the intended database, then apply the existing schema from the repository root:
 
@@ -86,9 +86,9 @@ To use Aiven PostgreSQL (and Cloudflare R2 once its credentials are available):
    npm run dev
    ```
 
-6. Open `http://localhost:5173`. API docs are at `http://localhost:8000/docs`, and the OpenAPI schema is at `http://localhost:8000/openapi.json`.
+6. Open `http://localhost:5173` and sign in with the bootstrap administrator account. Admins can create standard user accounts from the sidebar; public registration is disabled. API docs are at `http://localhost:8000/docs`, and the OpenAPI schema is at `http://localhost:8000/openapi.json`.
 
-To run only the local CSV dashboard without connecting to a database or R2, start the API in a PowerShell terminal at the repository root with `$env:MEDIPREDICT_DATABASE_ENABLED = "false"` followed by `.\backend\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload --port 8000`. Start the frontend using the steps above. Database-backed features return HTTP 503 in this mode.
+Protected dashboard and CSV endpoints require the database for user accounts. With `MEDIPREDICT_DATABASE_ENABLED=false`, only health and auth-setup endpoints remain available; the dashboard cannot be used in that mode.
 
 Install dependencies only if they are missing: `python -m pip install -r backend/requirements.txt` for the API, or `npm install` in `frontend/`. The legacy trainer is deprecated and must not be used; model serving is not enabled.
 

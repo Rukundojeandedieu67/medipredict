@@ -1,7 +1,28 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 
 ProvenanceStatus = Literal["synthetic", "uploaded_unverified", "verified"]
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class CreateUserRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=12, max_length=256)
+
+
+class AuthUserResponse(BaseModel):
+    id: str
+    email: str
+    role: Literal["admin", "user"]
+
+
+class AuthSessionResponse(BaseModel):
+    user: AuthUserResponse
+    csrf_token: str
 
 
 class VerificationSummary(BaseModel):

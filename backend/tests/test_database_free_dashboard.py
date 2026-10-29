@@ -20,8 +20,8 @@ def test_dashboard_routes_do_not_connect_to_database(monkeypatch):
         summary = client.get("/api/v1/inventory/summary")
 
     assert health.status_code == 200
-    assert summary.status_code == 200
-    assert summary.json()["facilities"] == 0
+    assert summary.status_code == 503
+    assert "MEDIPREDICT_DATABASE_ENABLED=true" in summary.json()["detail"]
 
 
 def test_database_backed_routes_report_unavailable_in_dashboard_only_mode(

@@ -73,6 +73,8 @@ def test_provenance_migration_backfills_and_downgrades_without_losing_rows(tmp_p
             "dataset_events",
             "model_releases",
             "dataset_archives",
+            "auth_users",
+            "auth_sessions",
         }.issubset(
             registry_tables
         )
@@ -106,6 +108,8 @@ def test_provenance_migration_backfills_and_downgrades_without_losing_rows(tmp_p
             "dataset_events",
             "model_releases",
             "dataset_archives",
+            "auth_users",
+            "auth_sessions",
         ):
             assert connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",

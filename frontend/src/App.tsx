@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { RiskRecord, StockAlert, Summary, TransferCandidate, TrustMetrics, UploadResult } from "./types";
 import { Icon, type IconName } from "./components/Icons";
 import { MedicineDetailModal } from "./components/MedicineDetailModal";
@@ -9,8 +9,19 @@ import { RiskRegisterView } from "./views/RiskRegisterView";
 import { TransfersView } from "./views/TransfersView";
 import { TrustView } from "./views/TrustView";
 import { UploadView } from "./views/UploadView";
+import { LoginView } from "./components/LoginView";
 
 type View = "overview" | "inventory" | "alerts" | "risk" | "transfers" | "trust" | "upload";
+interface AuthUser {
+  id: string;
+  email: string;
+  role: "admin" | "user";
+}
+
+interface AuthSession {
+  user: AuthUser;
+  csrf_token: string;
+}
 
 interface NavItem {
   id: View;
@@ -115,12 +126,23 @@ async function getResponseError(response: Response): Promise<string> {
 }
 
 async function fetchApi<T>(path: string): Promise<T> {
-  const response = await fetch(`/api/v1/${path}`);
+  const response = await fetch(`/api/v1/${path}`, { credentials: "same-origin" });
   if (!response.ok) throw new Error(await getResponseError(response));
   return response.json() as Promise<T>;
 }
 
 export function App() {
+  const [authStatus, setAuthStatus] = useState<"checking" | "signed-out" | "signed-in">("checking");
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [csrfToken, setCsrfToken] = useState("");
+  const [authConfigurationError, setAuthConfigurationError] = useState("");
+  const [authActionError, setAuthActionError] = useState("");
+  const [userManagementOpen, setUserManagementOpen] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [userManagementMessage, setUserManagementMessage] = useState("");
+  const [userManagementError, setUserManagementError] = useState("");
+  const [creatingUser, setCreatingUser] = useState(false);
   const [view, setView] = useState<View>("overview");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [risks, setRisks] = useState<RiskRecord[]>([]);
@@ -155,6 +177,101 @@ export function App() {
 
   // Mobile sidebar open state
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/v1/auth/me", { credentials: "same-origin" })
+      .then(async (response) => {
+        if (response.status === 401) {
+          if (active) setAuthStatus("signed-out");
+          return;
+        }
+        if (!response.ok) throw new Error(await getResponseError(response));
+        const session = (await response.json()) as AuthSession;
+        if (active) {
+          setAuthUser(session.user);
+          setCsrfToken(session.csrf_token);
+          setAuthStatus("signed-in");
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setAuthConfigurationError(
+            error instanceof Error ? error.message : "Authentication service is unavailable."
+          );
+          setAuthStatus("signed-out");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    const response = await fetch("/api/v1/auth/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!response.ok) throw new Error(await getResponseError(response));
+    const session = (await response.json()) as AuthSession;
+    setAuthUser(session.user);
+    setCsrfToken(session.csrf_token);
+    setAuthConfigurationError("");
+    setAuthStatus("signed-in");
+  };
+
+  const signOut = async () => {
+    setAuthActionError("");
+    try {
+      const response = await fetch("/api/v1/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "X-CSRF-Token": csrfToken },
+      });
+      if (!response.ok) {
+        setAuthActionError(await getResponseError(response));
+        return;
+      }
+      setAuthUser(null);
+      setCsrfToken("");
+      setAuthStatus("signed-out");
+    } catch (error) {
+      setAuthActionError(
+        error instanceof Error ? error.message : "Sign out could not be completed."
+      );
+    }
+  };
+
+  const createUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setUserManagementError("");
+    setUserManagementMessage("");
+    setCreatingUser(true);
+    try {
+      const response = await fetch("/api/v1/auth/users", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({ email: newUserEmail, password: newUserPassword }),
+      });
+      if (!response.ok) throw new Error(await getResponseError(response));
+      const account = (await response.json()) as AuthUser;
+      setUserManagementMessage(`Account created for ${account.email}.`);
+      setNewUserEmail("");
+      setNewUserPassword("");
+    } catch (error) {
+      setUserManagementError(
+        error instanceof Error ? error.message : "The account could not be created."
+      );
+    } finally {
+      setCreatingUser(false);
+    }
+  };
 
   const toggleAlertStatus = useCallback((alertId: string) => {
     setAlertStatuses((prev) => {
@@ -232,8 +349,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    if (authStatus === "signed-in") void loadData();
+  }, [authStatus, loadData]);
 
   // Handle CSV assessment
   const submitUpload = async (file?: File) => {
@@ -255,7 +372,12 @@ export function App() {
     body.append("file", file);
 
     try {
-      const response = await fetch("/api/v1/data/assess-csv", { method: "POST", body });
+      const response = await fetch("/api/v1/data/assess-csv", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "X-CSRF-Token": csrfToken },
+        body,
+      });
       if (!response.ok) throw new Error(await getResponseError(response));
       setUpload((await response.json()) as UploadResult);
     } catch (err) {
@@ -285,6 +407,18 @@ export function App() {
   const latestReportingDate = summary?.reporting_date && summary.reporting_date !== "—"
     ? summary.reporting_date
     : "Date unavailable";
+
+  if (authStatus === "checking") {
+    return <main className="auth-page"><p className="auth-loading">Checking secure session…</p></main>;
+  }
+  if (authStatus === "signed-out") {
+    return (
+      <LoginView
+        configurationError={authConfigurationError}
+        onLogin={signIn}
+      />
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -363,9 +497,28 @@ export function App() {
           <div className="user-profile-card">
             <div className="profile-avatar">RW</div>
             <div className="profile-details">
-              <strong>Supply Chain Officer</strong>
-              <small>Rwanda Workspace</small>
+              <strong>{authUser?.email}</strong>
+              <small>{authUser?.role === "admin" ? "Administrator" : "Workspace user"}</small>
             </div>
+          </div>
+          {authActionError && <p className="auth-inline-error" role="alert">{authActionError}</p>}
+          <div className="account-actions">
+            {authUser?.role === "admin" && (
+              <button
+                type="button"
+                className="account-action"
+                onClick={() => {
+                  setUserManagementOpen(true);
+                  setUserManagementError("");
+                  setUserManagementMessage("");
+                }}
+              >
+                Create user
+              </button>
+            )}
+            <button type="button" className="account-action" onClick={() => void signOut()}>
+              Sign out
+            </button>
           </div>
         </div>
       </aside>
@@ -563,6 +716,56 @@ export function App() {
           />
         );
       })()}
+      {userManagementOpen && authUser?.role === "admin" && (
+        <div className="auth-modal-backdrop" role="presentation">
+          <section
+            className="auth-card user-management-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-user-title"
+          >
+            <button
+              type="button"
+              className="auth-modal-close"
+              onClick={() => setUserManagementOpen(false)}
+              aria-label="Close create user form"
+            >
+              ×
+            </button>
+            <p className="auth-eyebrow">ADMINISTRATOR ACCESS</p>
+            <h2 id="create-user-title">Create workspace user</h2>
+            <p className="auth-description">New accounts receive standard user access, not administrator privileges.</p>
+            {userManagementError && <div className="auth-error" role="alert">{userManagementError}</div>}
+            {userManagementMessage && <div className="auth-success" role="status">{userManagementMessage}</div>}
+            <form className="auth-form" onSubmit={(event) => void createUser(event)}>
+              <label htmlFor="new-user-email">Email address</label>
+              <input
+                id="new-user-email"
+                type="email"
+                required
+                maxLength={254}
+                value={newUserEmail}
+                onChange={(event) => setNewUserEmail(event.target.value)}
+              />
+              <label htmlFor="new-user-password">Temporary password</label>
+              <input
+                id="new-user-password"
+                type="password"
+                required
+                minLength={12}
+                maxLength={256}
+                autoComplete="new-password"
+                value={newUserPassword}
+                onChange={(event) => setNewUserPassword(event.target.value)}
+              />
+              <small className="auth-hint">Use at least 12 characters. Share it securely.</small>
+              <button type="submit" className="auth-submit" disabled={creatingUser}>
+                {creatingUser ? "Creating account…" : "Create user"}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

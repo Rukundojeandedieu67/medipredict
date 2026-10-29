@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     csv_path: Path = ROOT / "datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv"
     uploads_path: Path = ROOT / "datasets/uploads"
     admin_api_key: str | None = None
+    auth_secret_key: str | None = None
+    auth_initial_admin_email: str | None = None
+    auth_initial_admin_password: str | None = None
+    auth_cookie_secure: bool = True
     training_min_records: int = 90
     training_min_records_monthly: int = 24
     training_min_facility_items: int = 12

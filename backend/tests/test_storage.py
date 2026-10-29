@@ -120,7 +120,7 @@ def test_s3_object_storage_writes_reads_and_deletes(monkeypatch):
 
 
 def test_s3_training_upload_uses_object_storage_and_database_registry(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, admin_client
 ):
     monkeypatch.setattr(settings, "storage_backend", "s3")
     monkeypatch.setattr(settings, "object_store_bucket", "dataset-bucket")
@@ -184,9 +184,10 @@ def test_s3_training_upload_uses_object_storage_and_database_registry(
         "TEST-FAC-001,TEST-ITEM-001,2026-01-01,10,1,0,true\n"
         "TEST-FAC-001,TEST-ITEM-001,2026-01-02,9,1,0,true\n"
     ).encode()
-    headers = {"X-Admin-API-Key": "test-admin-key"}
+    headers = {"X-Admin-API-Key": "test-admin-key", **admin_client[1]}
     try:
         with TestClient(main.app) as client:
+            client.cookies.update(admin_client[0].cookies)
             response = client.post(
                 "/api/v1/data/training-upload",
                 files={"file": ("dataset.csv", content, "text/csv")},
@@ -416,7 +417,7 @@ def test_dashboard_api_surfaces_safe_storage_configuration_error(monkeypatch, ca
     assert detail in caplog.text
 
 
-def test_dashboard_api_serves_synthetic_r2_dataset_to_ui(monkeypatch):
+def test_dashboard_api_serves_synthetic_r2_dataset_to_ui(monkeypatch, admin_client):
     content = (
         "reporting_month,facility_name,facility_type,district,province,"
         "nisr_under_5_population,nisr_poverty_rate_pct,nisr_malaria_prevalence_pct,"
@@ -428,6 +429,7 @@ def test_dashboard_api_serves_synthetic_r2_dataset_to_ui(monkeypatch):
     monkeypatch.setattr(main, "read_dashboard_csv", lambda: content)
 
     with TestClient(main.app) as client:
+        client.cookies.update(admin_client[0].cookies)
         response = client.get("/api/v1/inventory/summary")
 
     assert response.status_code == 200

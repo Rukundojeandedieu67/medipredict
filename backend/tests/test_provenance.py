@@ -197,7 +197,7 @@ def test_same_known_verifier_and_uploader_is_rejected(dataset):
 
 @pytest.mark.parametrize("storage_backend", ["local", "s3"])
 def test_admin_only_api_verify_revoke_detail_and_list(
-    tmp_path, monkeypatch, storage_backend
+    tmp_path, monkeypatch, storage_backend, admin_client
 ):
     monkeypatch.setattr(main.settings, "storage_backend", storage_backend)
     uploads = tmp_path / "uploads"
@@ -293,10 +293,15 @@ def test_admin_only_api_verify_revoke_detail_and_list(
     main.app.dependency_overrides[get_db] = override_get_db
     try:
         with TestClient(main.app) as client:
+            client.cookies.update(admin_client[0].cookies)
             uploaded = client.post(
                 "/api/v1/data/training-upload",
                 files={"file": ("dataset.csv", content, "text/csv")},
-                headers={"X-Admin-API-Key": "test-admin-key", "X-Uploader": "TEST-UPLOADER-001"},
+                headers={
+                    "X-Admin-API-Key": "test-admin-key",
+                    "X-Uploader": "TEST-UPLOADER-001",
+                    **admin_client[1],
+                },
             )
             assert uploaded.status_code == 200
             dataset_id = uploaded.json()["dataset_id"]
@@ -311,12 +316,14 @@ def test_admin_only_api_verify_revoke_detail_and_list(
                     "reporting_period_start": "0001-01-01",
                     "reporting_period_end": "0001-01-02",
                 },
+                headers=admin_client[1],
             )
             assert forbidden.status_code == 403
 
             headers = {
                 "X-Admin-API-Key": "test-admin-key",
                 "X-Admin-Identity": "TEST-VERIFIER-001",
+                **admin_client[1],
             }
             same_person = client.post(
                 f"/api/v1/data/datasets/{dataset_id}/verify",
@@ -383,12 +390,14 @@ def test_admin_only_api_verify_revoke_detail_and_list(
             ).all()
             assert stored_dataset is not None
             assert stored_dataset.sha256 == hashlib.sha256(content).hexdigest()
-            assert [event.event_type for event in events] == [
-                "upload",
-                "verification",
-                "revocation",
-            ]
-            evidence_details = events[1].details
+            event_types = [event.event_type for event in events]
+            assert {"upload", "training_queued", "verification", "revocation"} == set(
+                event_types
+            )
+            verification_event = next(
+                event for event in events if event.event_type == "verification"
+            )
+            evidence_details = verification_event.details
             assert evidence_details["evidence_file_sha256"] == hashlib.sha256(
                 b"TEST-EVIDENCE"
             ).hexdigest()
