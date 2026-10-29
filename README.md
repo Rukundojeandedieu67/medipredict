@@ -1,22 +1,66 @@
 # MediPredict Rwanda
 
-MediPredict monitors medicine availability through a React dashboard and FastAPI service. Inventory, consumption, and risk predictions currently use synthetic demonstration data; district indicators are unverified seed values. Do not use dashboard outputs for operational decisions.
+MediPredict Rwanda is a medicine-supply monitoring prototype for exploring facility inventory, stock-cover risk, alerts, and possible inter-facility transfers. It combines a React dashboard with a FastAPI service and a CSV-based data workflow.
+
+> **Important — demonstration system:** The default inventory, consumption, and risk data are synthetic; district indicators include unverified seed values. Live classifications use rule-based days-of-cover calculations. A validated machine-learning model is **not** served. Do not use this prototype or its outputs to make clinical, procurement, allocation, or emergency-response decisions.
+
+## Start the dashboard
+
+The quickest way to explore the demonstration is with Docker Compose:
+
+```powershell
+docker compose up --build
+```
+
+Then open:
+
+- Dashboard: <http://localhost:8080>
+- API health: <http://localhost:8000/api/v1/health>
+- Interactive API documentation: <http://localhost:8000/docs>
+
+Stop the services with `Ctrl+C` or `docker compose down`. The default Compose setup keeps API data in named Docker volumes. Do not run `docker compose down -v` unless you intend to delete those volumes.
+
+For detailed screen-by-screen instructions, CSV preparation, interpretation guidance, and recommendations for responsible adoption, read the [End-User Guide](docs/user-guide.md).
+
+## What users can do
+
+- **Overview:** scan facility and medicine counts, the latest reporting date, unresolved alerts, and priority records.
+- **Inventory:** search and filter facility-medicine records by district, risk, stock status, or data provenance; sort the list and inspect a record.
+- **Stock Alerts:** review stock-out, low-cover, and unavailable-cover warnings. Acknowledge or resolve an alert in this browser.
+- **Risk Register:** search records and filter by district or risk classification.
+- **Stock Transfers:** review possible donor-recipient matches for a medicine.
+- **Model Insights:** inspect model governance and methodology disclosures; this is not a live forecasting or clinical-performance report.
+- **Upload Data:** validate and assess a daily-frequency CSV, view the result, and access the CSV schema. The assessment uses the uploaded file and does not replace the dashboard's shared inventory snapshot.
+
+Use the **Refresh Data** button to reload the current dashboard snapshot. The displayed snapshot date is the latest reporting date in that data, not a guarantee that the data is current.
+
+## Readiness and responsible use
+
+- Treat all demonstration figures, rankings, projections, alerts, and transfer suggestions as examples—not verified stock positions or forecasts.
+- Verify physical counts, units, reporting dates, consumption, incoming orders, batch expiry, and provenance with the responsible facility and source system before any action.
+- Days of cover and 7-/14-day stock trajectories are arithmetic scenarios based on reported stock and consumption. They assume a constant consumption rate and do not account for deliveries or other real-world changes.
+- Missing or zero consumption means cover may be unavailable; it does not mean the medicine is safe or adequately stocked.
+- The default district indicators are unverified. Do not cite them as official statistics.
+- Do not upload patient-identifiable or otherwise sensitive information. The CSV intake is for facility-item inventory observations.
+- Dashboard alert acknowledgements and resolutions are saved in the current browser's local storage; they are not a shared or centrally audited workflow.
+
+For limitations, CSV handling, interpretation, and recommended next steps, see the [End-User Guide](docs/user-guide.md). For system status and data provenance, see [Dataset provenance](ml_engine/datasets/PROVENANCE.md) and [Data contract](docs/data_contract.md).
 
 For the staged Render, Vercel, and private AWS S3 deployment approach, see the [deployment plan](docs/deployment_plan.md). Hosting is separate from local development. Local development can use Aiven PostgreSQL and Cloudflare R2, or run the CSV-only dashboard without a database.
 
-## Run locally
+## Run locally (development)
 
 To use Aiven PostgreSQL (and Cloudflare R2 once its credentials are available):
 
-1. Copy `backend/.env.example` to `backend/.env`. Uncomment the Aiven connection URL and replace `REPLACE_WITH_URL_ENCODED_PASSWORD` with your Aiven password (URL-encode special characters). The host, port, user, database, and TLS mode are prefilled from your Aiven service details. Keep credentials in the ignored `.env` file; never commit them or put them in frontend settings.
-2. The screenshot provides no R2 bucket or S3 credentials, so keep `MEDIPREDICT_STORAGE_BACKEND=local` for now. When you have created an R2 bucket and S3 API token, enter those values, set `MEDIPREDICT_DASHBOARD_DATA_KEY` to the desired object key, and then select `MEDIPREDICT_STORAGE_BACKEND=s3`. In hosted Docker deployments, the approved dashboard CSV is included in the image and seeds/verifies that key on first read if it is missing.
+1. Copy `backend/.env.example` to `backend/.env` and configure the Aiven connection URL with the values from your database provider. URL-encode special characters in the password. Keep credentials in the ignored `.env` file; never commit them or put them in frontend settings.
+2. Local file storage is the default. To use Cloudflare R2, create a bucket and S3 API token, configure the R2 settings in the ignored `backend/.env`, set `MEDIPREDICT_DASHBOARD_DATA_KEY` to the dashboard CSV object key, and then select `MEDIPREDICT_STORAGE_BACKEND=s3`. In hosted Docker deployments, the dashboard CSV included in the image seeds and verifies a missing object on first read.
 3. If the Aiven database is new and empty, first confirm the connection URL points to the intended database, then apply the existing schema from the repository root:
 
    ```powershell
    .\backend\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
    ```
 
-   The screenshot shows an existing Aiven service, but does not show whether `defaultdb` already contains application tables. Do not run migrations until its schema and migration state have been checked.
+   Do not run migrations against a database containing existing application tables until its schema and migration state have been checked.
 4. Start the API from the repository root. Settings are loaded from `backend/.env`:
 
    ```powershell
@@ -43,9 +87,14 @@ All application routes use the `/api/v1` prefix:
 - `GET /health` — check service status.
 - `GET /inventory/summary` — retrieve current inventory totals.
 - `GET /predictions/risk-register` — browse risk predictions; supports `risk`, `district`, `search`, and `limit` filters.
-- `POST /data/upload-csv` — upload a CSV for risk recalculation (up to 20 MB).
+- `GET /alerts` — retrieve current in-app stock warnings (does not send notifications).
 - `GET /transfers/recommendations` — retrieve suggested stock transfers.
 - `GET /analytics/trust-metrics` — retrieve model metrics and feature importance.
+- `POST /data/assess-csv` — validate and assess a daily-frequency CSV (up to 20 MB).
+- `POST /data/validate-csv` — return a structured CSV validation report.
+- `POST /data/training-upload` — admin-key-protected registration that queues candidate training; it does not promote or serve a model.
+
+The deprecated `POST /data/upload-csv` route remains an alias for `/data/assess-csv`.
 
 The API reads `datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv` by default. Dashboard, summary, risk, alerts, transfer, and trust-metric calculations run in the backend; the frontend consumes these API responses. With S3 storage selected, a missing dashboard object is seeded from `MEDIPREDICT_CSV_PATH` on first read when that local CSV is available, then SHA-256 verified. If the deployment has no local CSV, upload the source object once to the configured key. Valid CSVs assessed through the UI are stored with a SHA-256-addressed metadata record in the configured storage backend. Set `MEDIPREDICT_DATABASE_ENABLED=true` to enable the existing SQLite-backed dataset registry, provenance administration, and notification dispatch; the default remains true for deployments. Configure `MEDIPREDICT_CSV_PATH`, `MEDIPREDICT_DATABASE_URL`, `MEDIPREDICT_MODEL_PATH`, and `MEDIPREDICT_CORS_ORIGINS` when needed. Relative API file paths and SQLite database paths are resolved from the repository root. Existing repository-root `.env` settings remain supported, with `backend/.env` taking precedence. CSV uploads must include the dataset headers shown in the frontend upload view. Phase 4 training requires the output of the validated training-upload and feature-building workflow; the legacy `ML_ENGINE_TRAINING_DATA_PATH` trainer is disabled by default.
 

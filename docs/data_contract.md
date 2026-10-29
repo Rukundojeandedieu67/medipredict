@@ -1,6 +1,6 @@
 # Inventory observation CSV contract
 
-This contract applies to CSV validation, assessment, and restricted training-data intake. Uploading a training dataset stores the validated source file and metadata only; it does not train a model. `data_frequency` is configured as `daily` or `monthly`; the default is `daily`.
+This contract applies to CSV validation, assessment, and restricted training-data intake. A valid training upload stores the source and metadata, then queues a candidate-training job; candidates are not automatically promoted or served. `data_frequency` is configured as `daily` or `monthly`; the default is `daily`.
 
 ## Required columns
 
@@ -53,9 +53,10 @@ The API-side frequency is configured with `MEDIPREDICT_DATA_FREQUENCY=daily|mont
 
 ## Endpoint behavior
 
-- `POST /api/v1/data/assess-csv` validates with assessment thresholds and returns a rule-based days-of-cover assessment for daily data only. Monthly data receives HTTP 422 rather than a misleading day-based estimate. It neither persists data nor trains.
+- `POST /api/v1/data/assess-csv` validates with assessment thresholds and returns a rule-based days-of-cover assessment for daily data only. Monthly data receives HTTP 422 rather than a misleading day-based estimate. A successful assessment stores the submitted CSV and SHA-256-checked metadata in configured object storage; it does not replace the dashboard snapshot, update inventory database rows, or train a model.
 - `POST /api/v1/data/validate-csv?purpose=assessment|training` returns the validator report only.
-- `POST /api/v1/data/training-upload` requires `X-Admin-API-Key` and stores a strictly validated CSV under a unique versioned directory in `datasets/uploads/v1/`, with SHA-256 and JSON metadata. It does not train.
+- `POST /api/v1/data/training-upload` requires `X-Admin-API-Key`, stores a strictly validated CSV and its SHA-256/provenance metadata, and queues candidate training. The response includes `training_status: "queued"`; the job status can be checked separately. It does not promote or serve the candidate.
+- `GET /api/v1/data/datasets/{dataset_id}/training-status` requires `X-Admin-API-Key` and returns the queued/running/completed/failed status and candidate details when available.
 - `GET /api/v1/data/datasets`, `GET /api/v1/data/datasets/{dataset_id}`, and `GET /api/v1/data/datasets/{dataset_id}/provenance` require the admin key and expose derived provenance.
 - `GET /api/v1/data/datasets/{dataset_id}/download` requires the admin key and returns the registered source CSV only after checking its SHA-256 against registry metadata.
 - `GET /api/v1/data/archives`, `GET /api/v1/data/archives/{archive_id}/download`, and `GET /api/v1/data/archives/{archive_id}/manifest` list and retrieve the byte-preserving dashboard CSV archive and its SHA-256-checked manifest. The archive is explicitly labeled synthetic and is not training-eligible.
