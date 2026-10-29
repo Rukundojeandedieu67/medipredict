@@ -1,3 +1,7 @@
+import asyncio
+from types import SimpleNamespace
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -119,3 +123,31 @@ def test_login_rejects_bad_credentials_and_csrf_is_required(monkeypatch, tmp_pat
                 assert admin.role == "admin"
     finally:
         test_engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("database_enabled", "secret_key", "message"),
+    [
+        (False, "x" * 40, "MEDIPREDICT_DATABASE_ENABLED=true"),
+        (True, None, "MEDIPREDICT_AUTH_SECRET_KEY"),
+        (True, "short", "at least 32 characters"),
+    ],
+)
+def test_admin_bootstrap_reports_exact_missing_configuration(
+    monkeypatch, database_enabled, secret_key, message
+):
+    monkeypatch.setattr(
+        main, "engine", SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    )
+    monkeypatch.setattr(settings, "database_enabled", database_enabled)
+    monkeypatch.setattr(settings, "storage_backend", "local")
+    monkeypatch.setattr(settings, "auth_secret_key", secret_key)
+    monkeypatch.setattr(settings, "auth_initial_admin_email", ADMIN_EMAIL)
+    monkeypatch.setattr(settings, "auth_initial_admin_password", ADMIN_PASSWORD)
+
+    async def start_application():
+        async with main.lifespan(main.app):
+            pass
+
+    with pytest.raises(RuntimeError, match=message):
+        asyncio.run(start_application())

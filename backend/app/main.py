@@ -120,13 +120,19 @@ async def lifespan(app: FastAPI):
 
     if settings.database_enabled and engine.dialect.name == "sqlite":
         Base.metadata.create_all(bind=engine)
-    if settings.database_enabled and (
-        settings.auth_initial_admin_email or settings.auth_initial_admin_password
-    ):
-        if not auth.auth_is_configured():
+    if settings.auth_initial_admin_email or settings.auth_initial_admin_password:
+        if not settings.database_enabled:
             raise RuntimeError(
-                "A database and a MEDIPREDICT_AUTH_SECRET_KEY of at least 32 "
-                "characters are required to bootstrap the initial admin."
+                "Set MEDIPREDICT_DATABASE_ENABLED=true to create the initial admin."
+            )
+        if not settings.auth_secret_key:
+            raise RuntimeError(
+                "Set MEDIPREDICT_AUTH_SECRET_KEY to a private value of at least "
+                "32 characters before bootstrapping the initial admin."
+            )
+        if len(settings.auth_secret_key) < 32:
+            raise RuntimeError(
+                "MEDIPREDICT_AUTH_SECRET_KEY must contain at least 32 characters."
             )
         auth.ensure_initial_admin(SessionLocal)
     yield
