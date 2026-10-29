@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 import sys
-import hashlib
 
 import numpy as np
 import pandas as pd
@@ -36,6 +36,7 @@ from ml import train_uploaded_dataset
 from backend.app.validation import ValidationConfig, validate_inventory_csv
 from backend.app import ml_service
 from ml.train import _create_artifact_directory
+from backend.app.config import settings
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -704,13 +705,33 @@ def _build_synthetic_feature_table(uploads_root: Path, output_root: Path) -> str
     return metadata["build_id"]
 
 
-def test_synthetic_end_to_end_training_is_unvalidated_and_versioned(tmp_path):
+def test_synthetic_end_to_end_training_is_unvalidated_and_versioned(
+    tmp_path, monkeypatch
+):
     feature_root = tmp_path / "features"
     upload_root = tmp_path / "uploads"
+    storage_root = tmp_path / "storage"
+    monkeypatch.setattr(settings, "storage_backend", "local")
+    monkeypatch.setattr(settings, "uploads_path", storage_root)
     build_id = _build_synthetic_feature_table(upload_root, feature_root)
     feature_metadata = json.loads(
         next(feature_root.rglob("metadata.json")).read_text(encoding="utf-8")
     )
+    dataset_id = feature_metadata["dataset_id"]
+    assert (
+        storage_root
+        / "datasets"
+        / "synthetic_generated"
+        / dataset_id
+        / "data.csv"
+    ).is_file()
+    assert (
+        storage_root
+        / "artifacts"
+        / "features"
+        / build_id
+        / "feature-table.zip"
+    ).is_file()
     assert feature_metadata["provenance_status"] == "synthetic"
     assert feature_metadata["verification"] is None
     assert feature_metadata["verified_dataset_hash"] is None
@@ -721,13 +742,28 @@ def test_synthetic_end_to_end_training_is_unvalidated_and_versioned(tmp_path):
         "--feature-root", str(feature_root),
         "--model-root", str(output_root),
     ]
+    environment = os.environ.copy()
+    environment["MEDIPREDICT_STORAGE_BACKEND"] = "local"
+    environment["MEDIPREDICT_UPLOADS_PATH"] = str(storage_root)
     completed = subprocess.run(
-        command, cwd=ROOT, capture_output=True, text=True, check=True
+        command,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=environment,
     )
     artifact_path = completed.stdout.strip().split("Artifact saved: ")[-1]
     artifact = Path(artifact_path)
 
     metadata = json.loads((artifact / "metadata.json").read_text(encoding="utf-8"))
+    assert (
+        storage_root
+        / "artifacts"
+        / "models"
+        / metadata["model_version"]
+        / "candidate.zip"
+    ).is_file()
     report = json.loads((artifact / "evaluation_report.json").read_text(encoding="utf-8"))
     assert metadata["notice"].startswith("SYNTHETIC - not evidence of real-world performance")
     assert metadata["is_synthetic"] is True
@@ -815,6 +851,8 @@ def test_real_upload_training_rejects_synthetic_registered_dataset(monkeypatch, 
 
 
 def test_real_upload_training_builds_and_trains_registered_dataset(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "storage_backend", "local")
+    monkeypatch.setattr(settings, "uploads_path", tmp_path / "storage")
     dataset_id = "v1-20261016T120000Z-" + "d" * 32
     registry = {
         "dataset_id": dataset_id,
@@ -823,11 +861,18 @@ def test_real_upload_training_builds_and_trains_registered_dataset(monkeypatch, 
     }
     feature_dir = tmp_path / "features" / "build"
     feature_dir.mkdir(parents=True)
+    (feature_dir / "features.csv").write_text("feature\n1\n", encoding="utf-8")
     (feature_dir / "metadata.json").write_text(
-        json.dumps({"build_id": "v1-feature-build"}),
+        json.dumps({"build_id": "v1-feature-build", "is_synthetic": False}),
         encoding="utf-8",
     )
     artifact_dir = tmp_path / "models" / "candidate"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "model.joblib").write_bytes(b"candidate")
+    (artifact_dir / "metadata.json").write_text(
+        json.dumps({"model_version": "candidate-v1", "is_synthetic": False}),
+        encoding="utf-8",
+    )
     calls = {}
 
     def build_dataset(actual_id, **kwargs):

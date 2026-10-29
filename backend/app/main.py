@@ -38,6 +38,7 @@ from .storage import (
     read_dashboard_csv,
     read_object,
     write_object,
+    write_verified_object,
 )
 from .schemas.api import (
     CsvAssessmentItem,
@@ -327,9 +328,43 @@ def _assessment_result(
     )
 
 
+def _store_assessment_upload(
+    content: bytes,
+    report: CsvValidationReport,
+) -> None:
+    digest = hashlib.sha256(content).hexdigest()
+    prefix = f"assessments/{digest}"
+    metadata = {
+        "sha256": digest,
+        "byte_size": len(content),
+        "row_count": report.row_count,
+        "date_range": report.date_range,
+        "is_synthetic": report.is_synthetic,
+        "data_source": "uploaded",
+        "provenance_status": report.provenance_status,
+    }
+    try:
+        write_verified_object(
+            f"{prefix}/data.csv",
+            content,
+            max_bytes=MAX_CSV_BYTES,
+        )
+        write_verified_object(
+            f"{prefix}/metadata.json",
+            json.dumps(metadata, sort_keys=True).encode("utf-8"),
+            max_bytes=MAX_CSV_BYTES,
+        )
+    except (ObjectStorageError, StorageConfigurationError) as exc:
+        logger.exception("Could not persist assessed CSV %s.", digest)
+        raise HTTPException(
+            503,
+            "The validated CSV could not be saved to configured storage.",
+        ) from exc
+
+
 @app.post("/api/v1/data/assess-csv", response_model=CsvAssessmentResult)
 async def assess_csv(file: UploadFile = File(...)):
-    _, frame = await _read_csv(file)
+    content, frame = await _read_csv(file)
     report = _validation_report(frame, "assessment")
     if report.data_frequency == "monthly":
         raise HTTPException(
@@ -339,7 +374,9 @@ async def assess_csv(file: UploadFile = File(...)):
                 "Monthly data can be validated and prepared for feature analysis."
             ),
         )
-    return _assessment_result(frame, report)
+    result = _assessment_result(frame, report)
+    _store_assessment_upload(content, report)
+    return result
 
 
 @app.post("/api/v1/data/validate-csv", response_model=CsvValidationReport)

@@ -7,6 +7,12 @@ import json
 from pathlib import Path
 import uuid
 
+from backend.app.config import settings
+from .artifact_storage import (
+    store_feature_directory,
+    store_model_directory,
+    store_synthetic_dataset,
+)
 from .build_dataset import build_dataset
 from .synthetic import generate_synthetic_supply_history
 from .train import FEATURE_ROOT, MODEL_ROOT, train_feature_dataset
@@ -55,7 +61,8 @@ def prepare_synthetic_feature_dataset(
     (dataset_dir / "metadata.json").write_text(
         json.dumps(registry, indent=2), encoding="utf-8"
     )
-    return build_dataset(
+    store_synthetic_dataset(dataset_dir, backend=settings.storage_backend)
+    feature_directory = build_dataset(
         dataset_id,
         frequency="monthly",
         horizon=1,
@@ -65,6 +72,8 @@ def prepare_synthetic_feature_dataset(
         uploads_root=data_root,
         output_root=feature_root,
     )
+    store_feature_directory(feature_directory, backend=settings.storage_backend)
+    return feature_directory
 
 
 def train_synthetic_candidate(
@@ -87,12 +96,14 @@ def train_synthetic_candidate(
     feature_metadata = json.loads(
         (feature_dir / "metadata.json").read_text(encoding="utf-8")
     )
-    return train_feature_dataset(
+    model_directory = train_feature_dataset(
         feature_metadata["build_id"],
         feature_root=feature_root,
         model_root=model_root,
         bootstrap_repetitions=bootstrap_repetitions,
     )
+    store_model_directory(model_directory, backend=settings.storage_backend)
+    return model_directory
 
 
 def main() -> None:

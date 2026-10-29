@@ -12,6 +12,7 @@ import pandas as pd
 
 from backend.app.config import ROOT, settings
 from backend.app.provenance import resolve_provenance
+from .artifact_storage import store_feature_directory
 from backend.app.validation import ValidationConfig, validate_inventory_csv
 from .features import DEFAULT_CALENDAR_PATH, FeatureBuilder
 from .labels import LabelMode, build_labels, label_prevalence
@@ -365,6 +366,7 @@ def main() -> None:
         output_root=args.output_root,
         calendar_path=args.calendar,
     )
+    store_feature_directory(output, backend=settings.storage_backend)
     metadata = json.loads((output / "metadata.json").read_text(encoding="utf-8"))
     prefix = (
         "SYNTHETIC - not evidence of real-world performance | "

@@ -38,6 +38,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from backend.app.config import settings
 from backend.app.provenance import ProvenanceError, resolve_provenance
+from .artifact_storage import store_model_directory
 from .leakage import target_leakage_diagnostics
 from .promote import evaluate_promotion_gate
 from .splits import assign_time_splits, grouped_unseen_split, time_based_split
@@ -1849,6 +1850,7 @@ def main() -> None:
         seed=args.seed,
         bootstrap_repetitions=args.bootstrap_repetitions,
     )
+    store_model_directory(artifact, backend=settings.storage_backend)
     artifact_metadata = json.loads((artifact / "metadata.json").read_text(encoding="utf-8"))
     prefix = _log_prefix(bool(artifact_metadata["is_synthetic"]))
     print(f"{prefix}Artifact saved: {artifact}")

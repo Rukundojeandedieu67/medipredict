@@ -7,7 +7,7 @@ import logging
 import pytest
 from fastapi import HTTPException, UploadFile
 
-from backend.app import ml_service
+from backend.app import main, ml_service
 from backend.app.main import assess_csv, trust_metrics, upload_csv
 
 
@@ -182,16 +182,15 @@ def test_model_artifact_requires_validation_and_matching_hash(
     assert ml_service.infer([_record()])[0]["method"] == "rule_based_fallback"
 
 
-def test_upload_without_synthetic_column_returns_required_validation_message():
-    with pytest.raises(HTTPException) as error:
-        asyncio.run(upload_csv(_upload_file(_csv_row(None))))
+def test_upload_without_synthetic_column_preserves_unknown_provenance(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(main.settings, "uploads_path", tmp_path / "uploads")
 
-    assert error.value.status_code == 422
-    assert (
-        error.value.detail["validation"]["errors"][0]["message"]
-        == "Column is_synthetic is required: true or false. "
-        "Unknown data provenance is not accepted."
-    )
+    result = asyncio.run(upload_csv(_upload_file(_csv_row(None))))
+
+    assert result.is_synthetic is None
+    assert result.provenance_status == "uploaded_unverified"
 
 
 def test_upload_with_invalid_synthetic_value_returns_4xx():

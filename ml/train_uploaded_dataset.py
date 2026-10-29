@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from backend.app.config import settings
+from .artifact_storage import store_feature_directory, store_model_directory
 from .build_dataset import (
     DEFAULT_OUTPUT_ROOT as DEFAULT_FEATURE_ROOT,
     _load_registered_dataset,
@@ -35,16 +36,19 @@ def train_uploaded_candidate(
         uploads_root=uploads_root,
         output_root=feature_root,
     )
+    store_feature_directory(feature_directory, backend=settings.storage_backend)
     feature_metadata = json.loads(
         (feature_directory / "metadata.json").read_text(encoding="utf-8")
     )
-    return train_feature_dataset(
+    model_directory = train_feature_dataset(
         feature_metadata["build_id"],
         feature_root=feature_root,
         model_root=model_root,
         minimum_history_periods=minimum_history_periods,
         bootstrap_repetitions=bootstrap_repetitions,
     )
+    store_model_directory(model_directory, backend=settings.storage_backend)
+    return model_directory
 
 
 def main() -> None:

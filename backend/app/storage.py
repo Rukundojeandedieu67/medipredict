@@ -1,5 +1,6 @@
 """Backend-only access to the configured dashboard data source."""
 
+import hashlib
 from pathlib import Path
 
 import boto3
@@ -17,6 +18,39 @@ class StorageConfigurationError(RuntimeError):
 
 class ObjectStorageError(RuntimeError):
     """The configured object could not be read."""
+
+
+def write_verified_object(
+    key: str,
+    content: bytes,
+    *,
+    max_bytes: int,
+    backend: str | None = None,
+) -> str:
+    """Write an immutable object and verify its content hash, accepting identical retries."""
+    if len(content) > max_bytes:
+        raise ObjectStorageError("The object exceeds the configured size limit.")
+
+    digest = hashlib.sha256(content).hexdigest()
+    try:
+        write_object(key, content, backend=backend)
+    except ObjectStorageError as write_error:
+        try:
+            existing = read_object(key, max_bytes=max_bytes, backend=backend)
+        except (ObjectStorageError, StorageConfigurationError) as read_error:
+            raise ObjectStorageError(
+                f"Could not store or verify immutable object {key}."
+            ) from read_error
+        if hashlib.sha256(existing).hexdigest() != digest:
+            raise ObjectStorageError(
+                f"An object already exists with different content: {key}."
+            ) from write_error
+        return digest
+
+    stored = read_object(key, max_bytes=max_bytes, backend=backend)
+    if hashlib.sha256(stored).hexdigest() != digest:
+        raise ObjectStorageError(f"Stored object failed its SHA-256 check: {key}.")
+    return digest
 
 
 def _local_object_path(key: str) -> Path:
@@ -205,6 +239,25 @@ def read_dashboard_csv() -> bytes | None:
             return content
         finally:
             body.close()
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code")
+        if error_code not in {"NoSuchKey", "404", "NotFound"}:
+            raise ObjectStorageError(
+                "The dashboard CSV could not be read from configured object storage."
+            ) from exc
+        try:
+            content = settings.csv_path.read_bytes()
+        except OSError as local_error:
+            raise ObjectStorageError(
+                "The dashboard CSV could not be read from configured object storage."
+            ) from local_error
+        write_verified_object(
+            settings.dashboard_data_key,
+            content,
+            max_bytes=MAX_DASHBOARD_CSV_BYTES,
+            backend="s3",
+        )
+        return content
     except (BotoCoreError, ClientError) as exc:
         raise ObjectStorageError(
             "The dashboard CSV could not be read from configured object storage."

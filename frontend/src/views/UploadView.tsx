@@ -147,7 +147,7 @@ export function UploadView({
             Upload Facility Inventory CSV<span className="heading-period">.</span>
           </h1>
           <p className="page-subtitle">
-            Validate CSV structure and generate instant in-memory risk assessments for facility stock records.
+          Validate and assess facility stock records in the backend, with accepted CSVs retained in configured storage.
           </p>
         </div>
         <div className="tabs-header-wrap">
@@ -204,7 +204,7 @@ export function UploadView({
                 <div className="dropzone-text">
                   <strong>
                     {uploading
-                      ? "Assessing facility records in-memory…"
+                      ? "Assessing and storing facility records in the backend…"
                       : selectedFile
                       ? selectedFile.name
                       : "Drag & drop your inventory CSV here or click to browse"}

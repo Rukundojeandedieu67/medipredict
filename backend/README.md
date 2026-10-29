@@ -2,7 +2,7 @@
 
 This project exposes its functionality through a FastAPI backend and a React dashboard in `frontend/`. The Vite development server proxies `/api` requests to the FastAPI backend.
 
-For Aiven PostgreSQL and Cloudflare R2, first copy `backend/.env.example` to `backend/.env`, fill in the Aiven connection URL and R2 bucket, endpoint, credentials, and dashboard CSV object key, then set `MEDIPREDICT_STORAGE_BACKEND=s3`. URL-encode special characters in the database password and keep all credentials in the ignored `.env` file. Upload the dashboard CSV to R2 before setting its object key; the API reads the R2 copy when S3 storage is enabled.
+For Aiven PostgreSQL and Cloudflare R2, first copy `backend/.env.example` to `backend/.env`, fill in the Aiven connection URL and R2 bucket, endpoint, credentials, and dashboard CSV object key, then set `MEDIPREDICT_STORAGE_BACKEND=s3`. URL-encode special characters in the database password and keep all credentials in the ignored `.env` file. When the dashboard object is missing, the API seeds that exact key from `MEDIPREDICT_CSV_PATH` if the configured local CSV is available; otherwise upload the dashboard CSV to R2 first. Existing keys are immutable and are never overwritten.
 
 If the Aiven database is new and empty, verify the connection URL points to the intended database, then apply the existing schema from the repository root:
 
@@ -26,9 +26,9 @@ API routes are under `/api/v1`. The development frontend uses `http://localhost:
 
 The current legacy model artifact is not accepted as validated: it lacks required time-based validation metadata and an artifact SHA-256. Assessments therefore use the explicitly labeled rule-based days-of-cover fallback, and confidence is not reported. Do not run the legacy training script or present its metrics as predictive performance.
 
-Uploads to `POST /api/v1/data/assess-csv` are assessed in memory and are not persisted to `DailyStockLog` or `Prediction`. They must include `is_synthetic` with `true` or `false`; provenance is not inferred. `POST /api/v1/data/validate-csv` only returns a structured validation report. `POST /api/v1/data/training-upload` is a distinct, admin-key-protected intake route that stores a validated dataset and metadata, then queues candidate training.
+Uploads to `POST /api/v1/data/assess-csv` are assessed by the backend and stored in configured object storage under a content-addressed key with a SHA-256-checked metadata record; they are not persisted to `DailyStockLog` or `Prediction`. Their `is_synthetic` provenance is preserved and never inferred. `POST /api/v1/data/validate-csv` only returns a structured validation report. `POST /api/v1/data/training-upload` is a distinct, admin-key-protected intake route that stores a validated dataset and metadata, then queues the leakage-safe `ml` candidate-training pipeline.
 
-When `MEDIPREDICT_DATABASE_ENABLED=false`, the CSV assessment and validation endpoints remain available, while training upload, dataset registry/provenance administration, and alert notification dispatch return HTTP 503. Set it to `true` (the default) to enable those database-backed features.
+When `MEDIPREDICT_DATABASE_ENABLED=false`, the CSV assessment and validation endpoints remain available, while training upload, dataset registry/provenance administration, and alert notification dispatch return HTTP 503. Assessment CSVs still use the configured local or S3 storage backend. Set database enablement to `true` (the default) to enable database-backed features.
 
 ### Database provenance migration
 

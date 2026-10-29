@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.app import main
 from backend.app.database import Base
+from backend.app.storage import ObjectStorageError
 from backend.app.validation import ValidationConfig, validate_inventory_csv
 
 
@@ -52,7 +53,7 @@ def database_session(tmp_path):
         engine.dispose()
 
 
-def test_assessment_endpoint_does_not_persist_upload(tmp_path, monkeypatch):
+def test_assessment_endpoint_persists_valid_upload_with_provenance(tmp_path, monkeypatch):
     monkeypatch.setattr(main.settings, "uploads_path", tmp_path / "uploads")
     content = _csv()
 
@@ -63,15 +64,39 @@ def test_assessment_endpoint_does_not_persist_upload(tmp_path, monkeypatch):
     assert result.provenance_status == "uploaded_unverified"
     assert result.items[0].provenance_status == "uploaded_unverified"
     assert result.items[0].method == "rule_based_fallback"
-    assert not (tmp_path / "uploads").exists()
+    digest = hashlib.sha256(content).hexdigest()
+    prefix = tmp_path / "uploads" / "assessments" / digest
+    assert (prefix / "data.csv").read_bytes() == content
+    metadata = json.loads((prefix / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["sha256"] == digest
+    assert metadata["is_synthetic"] is False
+    assert metadata["provenance_status"] == "uploaded_unverified"
 
 
-def test_synthetic_assessment_uses_synthetic_status():
+def test_assessment_returns_service_unavailable_if_storage_fails(monkeypatch):
+    def fail_store(*args, **kwargs):
+        raise ObjectStorageError("storage unavailable")
+
+    monkeypatch.setattr(main, "write_verified_object", fail_store)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(main.assess_csv(_upload(_csv())))
+
+    assert error.value.status_code == 503
+    assert error.value.detail == "The validated CSV could not be saved to configured storage."
+
+
+def test_synthetic_assessment_uses_synthetic_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(main.settings, "uploads_path", tmp_path / "uploads")
     result = asyncio.run(main.assess_csv(_upload(_csv(synthetic="true"))))
 
     assert result.provenance_status == "synthetic"
     assert result.items[0].provenance_status == "synthetic"
     assert result.validation.provenance_status == "synthetic"
+    stored_metadata = json.loads(
+        next((tmp_path / "uploads" / "assessments").glob("*/metadata.json")).read_text()
+    )
+    assert stored_metadata["is_synthetic"] is True
 
 
 @pytest.mark.parametrize(
@@ -80,8 +105,9 @@ def test_synthetic_assessment_uses_synthetic_status():
     ids=("missing-flag-column", "blank-flag"),
 )
 def test_assessment_accepts_unknown_synthetic_flag_as_uploaded(
-    include_synthetic, synthetic
+    include_synthetic, synthetic, tmp_path, monkeypatch
 ):
+    monkeypatch.setattr(main.settings, "uploads_path", tmp_path / "uploads")
     result = asyncio.run(
         main.assess_csv(
             _upload(
@@ -101,7 +127,10 @@ def test_assessment_accepts_unknown_synthetic_flag_as_uploaded(
     assert result.items[0].provenance_status == "uploaded_unverified"
 
 
-def test_legacy_upload_route_is_deprecated_assessment_alias(caplog):
+def test_legacy_upload_route_is_deprecated_assessment_alias(
+    caplog, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(main.settings, "uploads_path", tmp_path / "uploads")
     with caplog.at_level(logging.WARNING, logger="backend.app.main"):
         result = asyncio.run(main.upload_csv(_upload(_csv())))
 
@@ -142,7 +171,7 @@ def test_http_assess_and_validate_endpoints_return_contract_shapes(tmp_path, mon
     assert assessment_json["items"][0]["confidence"] is None
     assert validation.status_code == 200
     assert validation.json()["valid"] is True
-    assert not (tmp_path / "uploads").exists()
+    assert len(list((tmp_path / "uploads" / "assessments").glob("*/data.csv"))) == 1
 
 
 def test_training_upload_rejects_bad_files(monkeypatch):
