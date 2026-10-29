@@ -48,6 +48,18 @@ For limitations, CSV handling, interpretation, and recommended next steps, see t
 
 For the staged Render, Vercel, and private AWS S3 deployment approach, see the [deployment plan](docs/deployment_plan.md). Hosting is separate from local development. Local development can use Aiven PostgreSQL and Cloudflare R2, or run the CSV-only dashboard without a database.
 
+## Model Insights: methodology and governance
+
+The dashboard's **Model Insights** page is a governance and methodology view, not a live forecasting or clinical-performance report.
+
+- **Operational serving:** Live inventory risk classifications use transparent, rule-based days-of-cover logic. Predictive machine-learning serving is not enabled or authorized for live decisions. Confirm inventory against physical counts and source-maintained records.
+- **Development benchmarks:** No validated model metrics are currently available. Any historical evaluation metrics or test scores are developmental baselines on demonstration data, not evidence of real-world clinical or operational performance.
+- **Feature importance:** No feature-importance metrics are currently loaded from the repository artifact store. Missing signals do not mean zero importance or establish that a model is valid.
+- **Data provenance:** Demonstration stock levels, consumption, and risk trajectories are synthetic; generated API records are marked `is_synthetic=true`. District indicators are unverified seed values and must not be cited as confirmed statistics.
+- **Evaluation integrity:** Model training and evaluation require temporal out-of-time splits. Random train/test splits are prohibited to avoid leakage across inventory timelines.
+
+Do not use the dashboard's outputs or any development results for clinical, procurement, allocation, or emergency-response decisions. See the [End-User Guide](docs/user-guide.md) for interpreting the dashboard and [Dataset provenance](ml_engine/datasets/PROVENANCE.md) for source details.
+
 ## Run locally (development)
 
 To use Aiven PostgreSQL (and Cloudflare R2 once its credentials are available):
