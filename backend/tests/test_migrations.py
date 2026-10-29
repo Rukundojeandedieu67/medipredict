@@ -68,7 +68,12 @@ def test_provenance_migration_backfills_and_downgrades_without_losing_rows(tmp_p
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        assert {"datasets", "dataset_events", "model_releases"}.issubset(
+        assert {
+            "datasets",
+            "dataset_events",
+            "model_releases",
+            "dataset_archives",
+        }.issubset(
             registry_tables
         )
         dataset_columns = {
@@ -96,7 +101,12 @@ def test_provenance_migration_backfills_and_downgrades_without_losing_rows(tmp_p
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='alert_notification_states'"
         ).fetchone() is None
-        for table in ("datasets", "dataset_events", "model_releases"):
+        for table in (
+            "datasets",
+            "dataset_events",
+            "model_releases",
+            "dataset_archives",
+        ):
             assert connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 (table,),

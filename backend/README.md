@@ -33,3 +33,26 @@ When `MEDIPREDICT_DATABASE_ENABLED=false`, the CSV assessment and validation end
 ### Database provenance migration
 
 Alembic baseline and provenance migration files are prepared under `backend/migrations/`; they have not yet been applied. The provenance migration adds nullable `is_synthetic` and `data_source` columns to `daily_stock_logs` and `predictions`, and backfills existing rows with `is_synthetic=true` and `data_source="synthetic"`. Before applying to the live SQLite database, stamp the verified existing schema at the baseline, take and integrity-check a backup in the ignored `backups/` folder, then upgrade. The provenance migration can be downgraded without dropping or recreating application tables. Uploaded assessment and training-intake files remain separate from those database tables. See `docs/data_contract.md` for the CSV contract and endpoints.
+
+### Aiven and R2 dataset and candidate workflow
+
+With the Aiven URL, `MEDIPREDICT_DATABASE_ENABLED=true`, and `MEDIPREDICT_STORAGE_BACKEND=s3` plus R2 credentials configured in `backend/.env`, apply migrations only after confirming the target database is empty or at the expected Alembic revision:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
+```
+
+Archive the current dashboard CSV unchanged (it is synthetic and not training-eligible):
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m ml.archive_dashboard_csv
+```
+
+The API's `POST /api/v1/data/training-upload` stores a validated, eligible source CSV in R2 and records its metadata in Aiven. It does not train automatically. To manually build and register a candidate from the returned dataset ID:
+
+```powershell
+$datasetId = "paste-the-dataset-id-from-the-upload-response"
+.\backend\.venv\Scripts\python.exe -m ml.train_registered_dataset $datasetId
+```
+
+Source datasets, the archived dashboard CSV, feature tables, and candidate bundles can be retrieved through admin-key-protected endpoints documented in the repository root README. Downloads are SHA-256 checked. Candidate training does not promote or serve a model, and the current synthetic dashboard CSV cannot be converted into a valid training source.

@@ -49,6 +49,42 @@ All application routes use the `/api/v1` prefix:
 
 The API reads `datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv` by default. Set `MEDIPREDICT_DATABASE_ENABLED=true` to enable the existing SQLite-backed dataset registry, provenance administration, and notification dispatch; the default remains true for deployments. Configure `MEDIPREDICT_CSV_PATH`, `MEDIPREDICT_DATABASE_URL`, `MEDIPREDICT_MODEL_PATH`, and `MEDIPREDICT_CORS_ORIGINS` when needed. Relative API file paths and SQLite database paths are resolved from the repository root. Existing repository-root `.env` settings remain supported, with `backend/.env` taking precedence. CSV uploads must include the dataset headers shown in the frontend upload view. Phase 4 training requires the output of the validated training-upload and feature-building workflow; the legacy `ML_ENGINE_TRAINING_DATA_PATH` trainer is disabled by default.
 
+## Aiven and Cloudflare R2 dataset workflow
+
+Aiven PostgreSQL stores registry metadata, hashes, and archive/model records. CSV sources, verification evidence, feature bundles, and model bundles are stored in the configured Cloudflare R2 bucket. Configure `MEDIPREDICT_DATABASE_ENABLED=true`, the Aiven `MEDIPREDICT_DATABASE_URL`, `MEDIPREDICT_STORAGE_BACKEND=s3`, and all R2 settings in the ignored `backend/.env`. After archiving the dashboard CSV, set `MEDIPREDICT_DASHBOARD_DATA_KEY` to the R2 key printed by the archive command so the dashboard reads that same object.
+
+After confirming `defaultdb` is empty and the URL is correct, create the application schema with Alembic from the repository root:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
+```
+
+This applies schema migrations only; it does not connect to or upload data from this repository automatically. To archive the existing dashboard CSV byte-for-byte to R2 and register its synthetic provenance and SHA-256 metadata in Aiven, run:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m ml.archive_dashboard_csv
+```
+
+The existing dashboard CSV is explicitly synthetic, has only 10 monthly periods, and does not have the training pipeline's required schema or minimum history. It is archived for reference only and must not be used to train or validate a production model. Do not convert it into training labels or treat its predictions as real-world results.
+
+For a separate eligible dataset, use the protected `POST /api/v1/data/training-upload` endpoint. It stores the validated source CSV and registry metadata; it does not start training. Then manually run a candidate job against the returned dataset ID:
+
+```powershell
+$datasetId = "paste-the-dataset-id-from-the-upload-response"
+.\backend\.venv\Scripts\python.exe -m ml.train_registered_dataset $datasetId
+```
+
+The job reads and verifies the registered CSV from R2, uses the existing time-aware feature/training pipeline, and writes hashed feature and candidate-model bundles to R2 with their registry metadata in Aiven. It does not automatically promote or serve the candidate. Synthetic candidates remain labeled synthetic and cannot be promoted or served.
+
+The admin-key-protected retrieval endpoints are:
+
+- `GET /api/v1/data/archives`, `GET /api/v1/data/archives/{archive_id}/download`, and `GET /api/v1/data/archives/{archive_id}/manifest` — list and retrieve the original dashboard CSV archive and its manifest.
+- `GET /api/v1/data/datasets` and `GET /api/v1/data/datasets/{dataset_id}/download` — list and retrieve registered training sources.
+- `GET /api/v1/models` — list candidate release metadata.
+- `GET /api/v1/models/{model_version}/artifacts` and `GET /api/v1/models/{model_version}/features` — retrieve model and feature ZIP bundles.
+
+Every download verifies the content SHA-256 against its Aiven registry record before returning bytes. Send `X-Admin-API-Key` with the configured `MEDIPREDICT_ADMIN_API_KEY`. These routes and commands require configured Aiven and R2 access; they have not been run against the user's cloud services from this workspace.
+
 ## Where AI runs
 
 The current facility time-series CSV is about 7.5 MB and has 50,160 rows. Its operational stock and consumption values are synthetic, and district indicators are unverified seed values; see [`ml_engine/datasets/PROVENANCE.md`](ml_engine/datasets/PROVENANCE.md). The resource figures below are initial capacity-planning estimates for a single CPU-only run at about this scale, not measured benchmarks or service guarantees. They assume one job or one API instance at a time; measure representative approved data before setting an SLA or scaling up.

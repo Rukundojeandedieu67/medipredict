@@ -96,6 +96,24 @@ class DatasetEvent(Base):
     details: Mapped[dict[str, Any]] = mapped_column(JSON)
 
 
+class DatasetArchive(Base):
+    __tablename__ = "dataset_archives"
+
+    archive_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    source_name: Mapped[str] = mapped_column(String(255))
+    object_key: Mapped[str] = mapped_column(String(1024), unique=True)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    byte_size: Mapped[int] = mapped_column(Integer)
+    row_count: Mapped[int] = mapped_column(Integer)
+    period_start: Mapped[str] = mapped_column(String(20))
+    period_end: Mapped[str] = mapped_column(String(20))
+    is_synthetic: Mapped[bool] = mapped_column(Boolean)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class ModelRelease(Base):
     __tablename__ = "model_releases"
 

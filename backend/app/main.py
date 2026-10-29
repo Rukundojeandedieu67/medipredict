@@ -10,7 +10,7 @@ import tempfile
 import uuid
 
 import pandas as pd
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -56,6 +56,7 @@ from .validation import ValidationConfig, validate_inventory_csv
 
 logger = logging.getLogger(__name__)
 MAX_CSV_BYTES = 20 * 1024 * 1024
+MAX_TRAINING_ARTIFACT_BYTES = 512 * 1024 * 1024
 CSV_COLUMNS = {"facility_name": "facility", "district": "district", "province": "province", "facility_type": "facility_type", "medicine_code": "medicine_code", "medicine_name": "medicine", "end_of_month_stock_units": "stock_units", "avg_daily_consumption_units": "daily_consumption", "nisr_under_5_population": "under5_population", "nisr_poverty_rate_pct": "poverty_rate", "nisr_malaria_prevalence_pct": "malaria_prevalence", "rainy_season_active": "rainy_season", "reporting_month": "reporting_date"}
 
 
@@ -671,6 +672,225 @@ async def list_datasets(
         if directory.is_dir() and directory.name not in dataset_ids
     )
     return results
+
+
+@app.get("/api/v1/data/datasets/{dataset_id}/download")
+async def download_registered_dataset(
+    dataset_id: str,
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Dataset download")
+    record = _dataset_record(dataset_id, db)
+    if record is None:
+        raise HTTPException(404, "Registered dataset not found.")
+    try:
+        content = read_object(
+            record.object_key,
+            max_bytes=MAX_CSV_BYTES,
+            backend=record.storage_backend,
+        )
+    except (ObjectStorageError, StorageConfigurationError) as exc:
+        logger.exception("Could not retrieve registered dataset %s.", dataset_id)
+        raise HTTPException(503, "Dataset is unavailable from configured storage.") from exc
+    if hashlib.sha256(content).hexdigest() != record.sha256:
+        raise HTTPException(503, "Dataset failed SHA-256 verification.")
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{dataset_id}.csv"'},
+    )
+
+
+@app.get("/api/v1/data/archives")
+async def list_dataset_archives(
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Dataset archive listing")
+    records = db.scalars(
+        select(models.DatasetArchive).order_by(models.DatasetArchive.created_at.desc())
+    ).all()
+    return [
+        {
+            "archive_id": record.archive_id,
+            "source_name": record.source_name,
+            "object_key": record.object_key,
+            "sha256": record.sha256,
+            "byte_size": record.byte_size,
+            "row_count": record.row_count,
+            "period_start": record.period_start,
+            "period_end": record.period_end,
+            "is_synthetic": record.is_synthetic,
+            "provenance_status": "synthetic" if record.is_synthetic else "uploaded_unverified",
+            "metadata": record.metadata_json,
+        }
+        for record in records
+    ]
+
+
+@app.get("/api/v1/data/archives/{archive_id}/download")
+async def download_dataset_archive(
+    archive_id: str,
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Dataset archive download")
+    record = db.get(models.DatasetArchive, archive_id)
+    if record is None:
+        raise HTTPException(404, "Dataset archive not found.")
+    try:
+        content = read_object(
+            record.object_key,
+            max_bytes=MAX_CSV_BYTES,
+            backend="s3",
+        )
+    except (ObjectStorageError, StorageConfigurationError) as exc:
+        logger.exception("Could not retrieve dataset archive %s.", archive_id)
+        raise HTTPException(503, "Dataset archive is unavailable from configured storage.") from exc
+    if hashlib.sha256(content).hexdigest() != record.sha256:
+        raise HTTPException(503, "Dataset archive failed SHA-256 verification.")
+    filename = Path(record.source_name).name.replace('"', "")
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/v1/data/archives/{archive_id}/manifest")
+async def download_dataset_archive_manifest(
+    archive_id: str,
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Dataset archive manifest download")
+    record = db.get(models.DatasetArchive, archive_id)
+    if record is None:
+        raise HTTPException(404, "Dataset archive not found.")
+    manifest_key = record.metadata_json.get("manifest_object_key")
+    manifest_sha256 = record.metadata_json.get("manifest_sha256")
+    if not isinstance(manifest_key, str) or not isinstance(manifest_sha256, str):
+        raise HTTPException(404, "Dataset archive manifest is not registered.")
+    try:
+        content = read_object(
+            manifest_key,
+            max_bytes=MAX_CSV_BYTES,
+            backend="s3",
+        )
+    except (ObjectStorageError, StorageConfigurationError) as exc:
+        logger.exception("Could not retrieve dataset archive manifest %s.", archive_id)
+        raise HTTPException(503, "Dataset archive manifest is unavailable from configured storage.") from exc
+    if hashlib.sha256(content).hexdigest() != manifest_sha256:
+        raise HTTPException(503, "Dataset archive manifest failed SHA-256 verification.")
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{archive_id}.metadata.json"'},
+    )
+
+
+@app.get("/api/v1/models")
+async def list_model_releases(
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Model registry listing")
+    records = db.scalars(
+        select(models.ModelRelease).order_by(models.ModelRelease.created_at.desc())
+    ).all()
+    return [
+        {
+            "model_version": record.model_version,
+            "source_dataset_id": record.source_dataset_id,
+            "source_dataset_sha256": record.source_dataset_sha256,
+            "model_sha256": record.model_sha256,
+            "model_validated": record.model_validated,
+            "is_synthetic": record.is_synthetic,
+            "release_status": record.release_status,
+            "created_at": record.created_at,
+            "artifact_key": record.artifact_key,
+            "feature_dataset_id": record.metadata_json.get("feature_dataset_id"),
+            "feature_table_sha256": record.metadata_json.get("feature_table_sha256"),
+        }
+        for record in records
+    ]
+
+
+def _download_model_artifact(
+    release: models.ModelRelease,
+    *,
+    key_field: str,
+    hash_field: str,
+    filename: str,
+) -> Response:
+    metadata = release.metadata_json
+    object_key = metadata.get(key_field)
+    expected_hash = metadata.get(hash_field)
+    if not isinstance(object_key, str) or not isinstance(expected_hash, str):
+        raise HTTPException(404, "Requested model artifact is not registered.")
+    try:
+        content = read_object(
+            object_key,
+            max_bytes=MAX_TRAINING_ARTIFACT_BYTES,
+            backend="s3",
+        )
+    except (ObjectStorageError, StorageConfigurationError) as exc:
+        logger.exception(
+            "Could not retrieve artifact for model version %s.",
+            release.model_version,
+        )
+        raise HTTPException(503, "Model artifact is unavailable from configured storage.") from exc
+    if hashlib.sha256(content).hexdigest() != expected_hash:
+        raise HTTPException(503, "Model artifact failed SHA-256 verification.")
+    safe_version = "".join(
+        character for character in release.model_version if character.isalnum() or character in "-_"
+    )
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{safe_version}-{filename}.zip"'
+            )
+        },
+    )
+
+
+@app.get("/api/v1/models/{model_version}/artifacts")
+async def download_model_artifacts(
+    model_version: str,
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Model artifact download")
+    release = db.get(models.ModelRelease, model_version)
+    if release is None:
+        raise HTTPException(404, "Model version not found.")
+    return _download_model_artifact(
+        release,
+        key_field="model_bundle_key",
+        hash_field="model_bundle_sha256",
+        filename="candidate",
+    )
+
+
+@app.get("/api/v1/models/{model_version}/features")
+async def download_model_features(
+    model_version: str,
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Feature artifact download")
+    release = db.get(models.ModelRelease, model_version)
+    if release is None:
+        raise HTTPException(404, "Model version not found.")
+    return _download_model_artifact(
+        release,
+        key_field="feature_bundle_key",
+        hash_field="feature_bundle_sha256",
+        filename="features",
+    )
 
 
 @app.get("/api/v1/data/datasets/{dataset_id}/provenance", response_model=ProvenanceResponse)
