@@ -1,69 +1,118 @@
-# MediPredict Rwanda — End-User Guide
+# MediPredict Rwanda — Dashboard User Guide
 
-This guide is for supply-chain officers, facility data staff, and reviewers exploring the MediPredict Rwanda dashboard. It explains how to navigate the prototype, prepare a CSV for assessment, interpret results, and use the system responsibly.
+This guide covers what an end user can see and do in the MediPredict Rwanda web dashboard. It is intentionally focused on the frontend: navigation, page controls, displays, CSV assessment, and how to interpret the information shown.
 
-## 1. Before you begin
+## Important: demonstration dashboard
 
-MediPredict is currently a **demonstration and workflow prototype**, not an operational source of truth:
+MediPredict is a demonstration and workflow prototype, not an operational source of truth.
 
-- The bundled inventory, consumption, and risk records are synthetic demonstration data. Some district indicators are unverified seed values.
-- Live risk classifications use rule-based days-of-cover logic. A validated machine-learning model is not enabled for live serving.
-- Stock projections assume the reported consumption rate continues unchanged and no new stock arrives. They are scenarios, not calibrated forecasts.
-- Transfer matches are suggestions calculated from reported balances, not approved movements.
-- Do not use this system alone to make clinical, procurement, allocation, or emergency-response decisions.
+- The bundled medicine stock, consumption, and risk data are synthetic. Some district indicators are unverified seed values.
+- Risk tiers use rule-based days-of-cover calculations. A validated machine-learning model is not used for live classifications.
+- Stock trajectories assume that reported consumption stays constant and that no deliveries arrive. They are simple scenarios, not forecasts.
+- Transfer cards are suggestions, not approved transfer orders.
+- Do not use the dashboard by itself to make clinical, procurement, allocation, or emergency-response decisions.
 
-Confirm all important findings with current physical stock counts, the responsible facility, and the authoritative inventory/requisition system.
+Confirm important findings with current physical stock counts, the responsible facility, and your organization's approved inventory and requisition processes.
 
-## 2. Open the dashboard
+## Getting oriented
 
-When the system is running, open the dashboard URL provided by your administrator. In a local Docker Compose setup, it is <http://localhost:8080>.
+### Navigation
 
-The left navigation opens each workspace. The status card at the bottom of the navigation reports whether the API health check passed. The top bar shows the latest reporting date in the currently loaded dashboard dataset and provides **Refresh Data**.
+Use the sidebar to move between **Overview**, **Inventory**, **Stock Alerts**, **Risk Register**, **Stock Transfers**, **Model Insights**, and **Upload Data**. On a smaller screen, open the navigation using the menu button in the header.
 
-If the API is offline, check with the system administrator rather than relying on any figures still visible in the page. A successful health check means only that the API responded; it does not prove that the underlying data is complete, current, or verified.
+### Connection, snapshot, and refresh
 
-## 3. A practical review workflow
+- The sidebar status card shows whether the dashboard can reach its service. **API Connected** only means the health check succeeded; it does not confirm that the displayed data is current or verified.
+- The top bar's **Snapshot** date is the latest reporting date in the loaded dashboard data. It is not necessarily today's date.
+- Select **Refresh Data** to reload the displayed summary, inventory, alerts, transfer suggestions, and model-insight information.
+- If an error banner appears, read it and use **Retry** or **Refresh Data**. If the problem continues, contact the dashboard administrator. Do not rely on old figures remaining on screen.
 
-1. **Check the data before interpreting it.** Note the snapshot date. Look for the data-status/provenance labels (such as **Synthetic**, **Uploaded**, or **Verified Source**) and read the demonstration and methodology notice.
-2. **Start at Overview.** Use the summary and priority list to find records that may need investigation. Treat the counts as counts in the loaded dataset, not confirmed facility-wide totals.
-3. **Investigate in Inventory or Risk Register.** Search by medicine name/code, facility, or district. Filter and sort to narrow the list. Open a row to inspect its details, reported stock, consumption, cover, and data-status labels.
-4. **Review Stock Alerts.** Search or filter by severity, alert type, and status. Follow up with the facility/source owner to verify the report. Acknowledge an alert when someone has begun reviewing it; mark it resolved only after confirming the underlying issue is addressed.
-5. **Use Stock Transfers as a discussion prompt.** Confirm current stock, demand, expiry, cold-chain requirements, transport, approvals, and donor safety stock before proposing or authorizing any movement. A displayed match is not a transfer order.
-6. **Record the decision outside the prototype.** Use the organization’s approved inventory, requisition, incident, and audit processes for assignments, approvals, and follow-up.
-7. **Refresh after the source data changes.** Confirm that the reporting date has advanced as expected and verify the underlying source update with the data owner.
+The dashboard also displays a demonstration and methodology notice. Read it before interpreting results.
 
-### What the risk labels mean
+## Overview
 
-For records with usable positive consumption, the rule-based calculation is:
+Start here for a high-level view of the loaded snapshot:
 
-`estimated days of cover = reported stock on hand / average daily consumption`
+- **Monitored Facilities**, **Open / Unresolved Alerts**, **Medicines Tracked**, and **Rebalancing Transfers** summarize the records currently shown.
+- Select a summary card to open its related page.
+- **Medicines Requiring Attention First** highlights stock-outs and records with critical cover. Use **Inspect** to open the record details, or **View All Alerts** to review warnings.
+- **Stock Coverage Distribution** summarizes the risk tiers in the displayed dataset. It is a distribution of available records, not a measure of system-wide medicine availability.
+- Other overview panels may summarize provincial records or recent alerts/transfers. Treat their rankings and counts as leads to investigate, not confirmed operational findings.
 
-The normal thresholds are **Critical** below 7 days, **Moderate** from 7 through 14 days, and **Stable** above 14 days. Reported zero stock or a recorded stock-out is critical. If consumption is missing, invalid, or zero, cover may be unavailable or classified as unknown; do not interpret a missing estimate or a “Stable” display from a special assessment case as evidence of adequate supply.
+When there are no priority records, do not assume that stock is adequate: check the reporting date, provenance labels, and whether the underlying data is complete.
 
-Seven- and fourteen-day stock trajectories subtract average daily consumption from current stock and do not include expected deliveries. These values do not model changing demand, replenishment uncertainty, expiry, stock quality, or other operational constraints.
+## Inventory
 
-### Alert statuses are browser-local
+Use **Inventory** to search and inspect facility-medicine records.
 
-The **Open**, **Acknowledged**, and **Resolved** labels are saved in local storage in the browser you are using. They are not shared with other users, synchronized to a central service, or a formal audit record. Clearing browser data or switching browsers may remove or change the locally tracked statuses. Use your organization’s approved system for shared ownership and audit history.
+1. Type a medicine name/code, facility, or district in the search box.
+2. Narrow results with **District**, **Risk Level**, **Status**, and **Data Origin** filters.
+3. Select a table heading to sort by medicine, facility, stock, daily consumption, cover, or risk.
+4. Use the page controls to move between records or change how many rows are shown.
+5. Select **Inspect** to open a detailed medicine view.
+6. Select **Reset** to clear active filters.
 
-In-app alerts are not the same as email/SMS delivery. The dashboard does not send notifications merely because it is open; any configured notification dispatch is an administrator-controlled operation.
+The table includes reported stock, daily use, days of cover, a short stock trajectory, risk tier, and provenance/method badges. A dash or unavailable cover means there is not a usable cover estimate; it does not indicate that stock is safe.
 
-## 4. Assess an inventory CSV
+## Stock Alerts
 
-The **Upload Data** page’s **Upload & Assess** tab assesses the selected file. It does not replace the dashboard’s shared snapshot or enroll the file as an approved training dataset. Accepted assessment files are retained in the configured storage backend; ask your administrator how long that storage is retained and who can access it.
+Use **Stock Alerts** to investigate warnings from the latest available records.
 
-### Required columns
+- Search by facility, district, medicine, or the alert reason.
+- Filter by **Severity**, **Alert Type**, or **Status**. The summary cards at the top can also filter critical alerts, warnings, or items marked resolved.
+- Read the alert's reason, reporting date, stock balance, daily consumption, estimated cover, and depletion scenario.
+- Select the status badge to cycle from **Open / Action Required** to **Acknowledged**, then **Resolved**, then back to **Open**.
+- Select **Check Transfers** to view transfer suggestions, when available, or **Full Audit** to inspect the matching inventory record.
+- Use **Reset** or **Reset Filters** to remove filters.
 
-The CSV must have a header row and these exact column names:
+The alert status is a convenience for the current browser, not a shared assignment or audit trail. It is saved in browser storage and may not be visible to another user or device. Record follow-up in your organization's approved shared workflow.
 
-| Column | Meaning |
+The recommended action shown on a card is a prompt for investigation, not an instruction or authorization. Verify the record and physical stock before acting. In-app alerts do not mean that an email or text notification has been sent.
+
+## Risk Register
+
+Use **Risk Register** for a paginated, searchable view of risk-classified records.
+
+1. Search for a facility, district, medicine, or medicine code.
+2. Select a district and risk tier to narrow the results.
+3. Review stock, daily consumption, the 14-day scenario, cover, risk tier, and the method/provenance badges.
+4. Select **Inspect** for more detail.
+5. Change the page size or use the page controls to browse matching records.
+
+The displayed method is rule-based. A confidence value or historical metric elsewhere in the dashboard should not be read as proof of real-world predictive performance.
+
+## Stock Transfers
+
+Use **Stock Transfers** to explore possible donor-recipient matches:
+
+- Search by medicine or either facility.
+- Filter by district. A district match may refer to either the donor or the recipient.
+- Each card shows the medicine, suggested quantity, donor and recipient, districts, and their reported cover.
+
+The page describes a proposed minimum donor buffer and target recipient cover. Before considering a movement, confirm stock counts, demand, batch and expiry, cold-chain needs, transportation, donor safety stock, and required approvals. The dashboard does not initiate or authorize a transfer.
+
+## Model Insights
+
+Use **Model Insights** to read the dashboard's methodology and governance disclosures. The page may show a development metric or feature-importance information when such metadata is available.
+
+The page explicitly notes that live classifications use rule-based fallback logic and that predictive ML serving is not enabled. Any development metrics or signals shown are not evidence of clinical or operational performance. Do not interpret a blank metric as zero or a missing model as a successful model.
+
+## Upload Data: assess a CSV
+
+The **Upload & Assess** tab is for checking and viewing an assessment of a selected facility-inventory CSV. It does not replace the shared dashboard snapshot. The user interface does not provide an approval or promotion workflow for the assessment.
+
+### Required CSV headers
+
+The first row must contain these exact column names:
+
+| Header | What to provide |
 |---|---|
-| `facility_id` | Stable, non-empty facility identifier |
-| `item_id` | Stable, non-empty medicine/item identifier |
-| `date` | Reporting date in `YYYY-MM-DD` format |
-| `stock_on_hand` | Available stock units at the reported date; zero or greater |
-| `units_consumed` | Units consumed during the reporting period; zero or greater |
-| `units_received` | Units received during the reporting period; zero or greater |
+| `facility_id` | A stable, non-empty facility identifier |
+| `item_id` | A stable, non-empty medicine or product identifier |
+| `date` | Reporting date written as `YYYY-MM-DD` |
+| `stock_on_hand` | Available stock in the item's stock unit; zero or greater |
+| `units_consumed` | Quantity consumed for the reporting period; zero or greater |
+| `units_received` | Quantity received for the reporting period; zero or greater |
 
 Example:
 
@@ -73,83 +122,64 @@ RW-KAY-HC01,AL-20120,2026-03-01,150,25,0,false
 RW-GAS-DH02,PARACET-500,2026-03-01,0,40,0,false
 ```
 
-### Recommended optional columns
+The **CSV Specifications** tab in the dashboard also lists required and optional columns and provides a sample.
 
-Include `is_synthetic` and set it to `true` for generated or simulated records. If it is omitted or blank, synthetic status is **unknown**; the system does not assume the data is real. Other supported optional columns include:
+### Before submitting
 
-- `stockout_flag` (`true`/`false`) and `stock_out_days`
-- `lead_time_days` and `reorder_level`
-- `facility_type`, `region`, and `district`
-- `urban_rural`, `item_category`, and `reporting_completeness`
-- `catchment_population`, `rainfall_anomaly`, and `temperature_anomaly`
-- `program_funded`, `cold_chain`, and `outbreak_flag`
-- `district_replenishment_date` in `YYYY-MM-DD` format
+- Use consistent item-specific units for stock, consumption, and receipts.
+- Ensure dates and numbers are valid; stock, consumption, and receipts must not be negative.
+- Avoid duplicate facility-item reporting periods and keep each facility-item history chronological.
+- Include `is_synthetic=true` when records are generated or simulated. If synthetic status is omitted, it remains unknown; an upload is not automatically real or verified.
+- Do not include patient identifiers or patient-level information.
+- The interface accepts CSV files up to 20 MB. The current assessment supports daily-frequency data only; monthly data cannot be assessed as a day-based estimate.
 
-See the full [Inventory observation CSV contract](data_contract.md) for types, units, validation rules, and all optional fields.
+### Select and assess
 
-### Prepare and submit
+1. Open **Upload Data** and stay on **Upload & Assess**.
+2. Choose a `.csv` file in the drop area.
+3. Review the required-column check and the small sample preview. The preview is only a quick check and does not replace full validation.
+4. If the interface reports a missing header or a file-size/type problem, correct it and choose the file again.
+5. Select **Run In-Memory Risk Assessment**.
+6. Review the assessment summary, validation errors and warnings, risk tiers, and the displayed sample of assessed records. Correct data problems before relying on any result.
 
-1. Export a CSV containing facility-item observations only; do not include patient identifiers or patient-level data.
-2. Use one stable identifier per facility and item. Use consistent item-specific units for stock, consumption, receipts, and reorder levels.
-3. Ensure dates are valid ISO dates, values are finite and non-negative, and each facility-item-period appears only once.
-4. Keep each facility-item history in chronological order. Missing periods and unusual consumption/stock ratios may be reported as warnings.
-5. On **Upload Data**, choose the CSV and inspect the column check and sample preview.
-6. Select **Run In-Memory Risk Assessment**. Review the validation report and warnings before interpreting the displayed assessment.
+If the assessment fails, read the message shown on the page. Common causes include missing headers, malformed dates or values, negative numbers, duplicate records, or a monthly file. Ask the administrator for help if the issue appears to be with dashboard availability rather than the CSV.
 
-Assessment uploads are limited to 20 MB. The current rule-based risk assessment supports **daily-frequency data only**. Monthly files may be validated/prepared through the data workflow but are not given a misleading day-based assessment; the assessment endpoint returns an error for monthly data. The configured API frequency must match the frequency of the file.
+The results show rule-based calculations, not a learned forecast. Only a limited sample of assessed rows and validation messages is displayed. Accepted assessment files may be retained by the system; do not upload sensitive information.
 
-The results page shows an assessment summary and a limited sample of records. A successful validation does not mean that source data is accurate or independently verified. An assessment is rule-based, not a trained-model prediction.
+### Provenance badges
 
-### Understand provenance labels
+- **Synthetic** identifies demonstration/synthetic data.
+- **Uploaded** identifies data supplied through a CSV; it does not confirm its source.
+- **Verified Source** indicates that a source verification record is displayed. It is not a guarantee that every value is correct or suitable for a decision.
+- **Rule-based estimate** identifies the days-of-cover method rather than a trained-model prediction.
 
-| Label | Meaning |
+### Registered Uploads
+
+The bottom of the **Upload & Assess** page has a **Registered Uploads** panel. This is separate from selecting a CSV for assessment. It is intended for authorized users who have been given an administrator key:
+
+1. Enter the key in the password field.
+2. Select **Load registered uploads**.
+3. Review each dataset's displayed provenance status, row count, date period, uploader, verification details, and any warning.
+
+If you are not an authorized administrator, leave this panel unused and ask the system administrator for help. Do not share the key or enter it on a shared/untrusted computer. Loading this list does not make an uploaded file verified.
+
+## Reading the main labels
+
+| Display | Interpretation |
 |---|---|
-| **Synthetic** | The data is marked or derived as synthetic demonstration data. It is not evidence of real facility conditions. |
-| **Uploaded** | The data was supplied through an upload; the source has not necessarily been independently checked. |
-| **Verified Source** | An administrator has recorded a provenance verification against an approved source. This checks documented origin, not every value’s accuracy or fitness for a particular decision. |
+| **Critical** | Usually zero stock/recorded stock-out or fewer than 7 days of calculated cover. Verify urgently with the source. |
+| **Moderate** | Usually 7–14 days of calculated cover. Confirm the latest stock and replenishment plan. |
+| **Stable** | Usually more than 14 days of calculated cover. It is not a guarantee of availability or data quality. |
+| **Unknown / Cover Unavailable** | The interface cannot calculate a meaningful cover value, often because consumption is zero, missing, or invalid. Investigate the source data. |
+| **Snapshot** | Reporting date associated with the current displayed dataset, not necessarily today's date. |
 
-Uploading a file does not make it verified. Do not set `is_synthetic=false` unless the source owner can support that assertion, and do not treat it alone as verification.
+For positive daily consumption, cover is calculated as `stock on hand / daily consumption`. The 7- and 14-day scenarios subtract consumption at the same rate and assume no incoming deliveries. They do not model changing demand, replenishment uncertainty, expiry, or stock quality.
 
-## 5. Registered datasets and administrator-only intake
+## Good practices for users
 
-The **Registered Uploads** area on the Upload Data page is for viewing registered dataset provenance and requires an administrator API key. Keep that key private; do not paste it into shared machines or browser screenshots.
-
-The protected `POST /api/v1/data/training-upload` endpoint is different from the normal **Upload & Assess** flow: it registers a validated dataset and queues a candidate-training job. Access requires an administrator key and database-backed features. A queued job is not a deployed model. Candidate models are not automatically promoted or served, and synthetic or unverified data cannot qualify as an approved live model.
-
-Only authorized data stewards should use this intake. First confirm data-owner approval, provenance, frequency, schema, retention/access controls, and the required minimum history. Check training status and provenance through the protected API before drawing conclusions. See the [Data contract](data_contract.md), [API documentation](../backend/README.md), and [ML pipeline notes](../ml_engine/README.md).
-
-## 6. Recommendations for organizations evaluating MediPredict
-
-These are recommended adoption steps, not system-generated assurances:
-
-1. **Start with a data-governance review.** Assign owners for each source, reporting period, facility/item identifier, unit of measure, provenance claim, and correction process.
-2. **Pilot in shadow mode.** Compare dashboard records with independently checked facility counts and existing supply-chain procedures. Log discrepancies and false alarms; do not let the prototype trigger orders or transfers.
-3. **Set operational definitions with stakeholders.** Agree on reporting cadence, stock-out evidence, consumption periods, stock units, alert thresholds, escalation routes, and acceptable data freshness before using results in routine reviews.
-4. **Validate the full data pipeline.** Measure completeness, duplicate rates, missing periods, late reports, unit consistency, and district/facility mapping. Investigate validation warnings rather than silently accepting them.
-5. **Protect sensitive data.** Keep uploads to the minimum facility-item information needed. Define authorized users, storage location, retention/deletion, backups, audit expectations, and incident response. Do not send real or sensitive data to third-party services without explicit owner approval.
-6. **Keep human approval explicit.** Require staff to confirm stock, receipts, expiry, and transport conditions and to follow existing requisition/transfer authorization.
-7. **Require evidence before model use.** Before enabling any ML model, require verified real-world data, leakage-safe temporal evaluation, performance checks relevant to decisions and subgroups, independent review, reproducible artifact hashes, monitoring, rollback, and a documented owner sign-off. Development metrics or synthetic tests are not deployment evidence.
-8. **Operationalize only after a controlled pilot.** Establish named owners, shared alert/decision tracking, support and escalation, uptime/backups, and routine data-quality reviews. The current browser-local alert statuses are not suitable as a shared operational record.
-
-## 7. Troubleshooting
-
-| Symptom | What to check |
-|---|---|
-| **API Offline** or page cannot load data | Confirm the API container/service is running; check `http://localhost:8000/api/v1/health` in a local Compose setup; ask the administrator to inspect API logs. |
-| API is connected but dashboard data is unavailable | Ask the administrator to check the configured CSV/object-storage location and its schema. A healthy API does not guarantee its data source is available. |
-| CSV is rejected before upload | Confirm the `.csv` extension, size under 20 MB, all required headers, and no typos in column names. |
-| CSV fails validation | Read the row/column-specific errors. Correct invalid dates/numbers, negative values, duplicate facility-item-periods, and malformed booleans. Review warnings for missing periods or unusual values. |
-| Monthly CSV cannot be assessed | This is expected: the current rule-based assessment accepts daily-frequency data only. Do not convert monthly consumption to daily values without a documented, reviewed method. |
-| Assessment says cover is unavailable | Check that consumption is present and greater than zero and that stock/consumption use compatible units. Confirm the original record with its source. |
-| Dataset registry does not load | The registry needs database-backed features and a valid administrator API key. Contact the system administrator; do not share the key in chat or email. |
-| Numbers do not match a facility report | Compare the reporting date, item identifier, units, stock balance, consumption period, and source extract. Correct the source or report the discrepancy; do not treat the dashboard as the authority. |
-
-## 8. Further documentation
-
-- [Project README and quick start](../README.md)
-- [Inventory observation CSV contract](data_contract.md)
-- [Stock warnings and notifications](alerts.md)
-- [Dataset and field provenance](../ml_engine/datasets/PROVENANCE.md)
-- [Deployment plan](deployment_plan.md)
-- [Backend/API setup](../backend/README.md)
-- [ML pipeline notes](../ml_engine/README.md)
+1. Check the snapshot date and provenance before interpreting any count or badge.
+2. Verify concerning records with the facility and authoritative source; report discrepancies to the data owner.
+3. Treat the dashboard's recommendations as prompts for human review, never as automatic orders or transfers.
+4. Use approved organizational systems for task ownership, decisions, approvals, and audit history.
+5. Protect uploaded files and administrator credentials; do not upload patient-level or other sensitive information.
+6. If information appears stale, incomplete, or contradictory, stop and ask the data owner or administrator rather than relying on the dashboard.
