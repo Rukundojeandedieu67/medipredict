@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     auth_secret_key: str | None = None
     auth_initial_admin_email: str | None = None
     auth_initial_admin_password: str | None = None
+    auth_demo_email: str | None = None
+    auth_demo_password: str | None = None
     auth_cookie_secure: bool = True
     training_min_records: int = 90
     training_min_records_monthly: int = 24

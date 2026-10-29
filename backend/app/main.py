@@ -135,6 +135,15 @@ async def lifespan(app: FastAPI):
                 "MEDIPREDICT_AUTH_SECRET_KEY must contain at least 32 characters."
             )
         auth.ensure_initial_admin(SessionLocal)
+    if settings.database_enabled and (
+        settings.auth_demo_email or settings.auth_demo_password
+    ):
+        if not auth.auth_is_configured():
+            raise RuntimeError(
+                "Set MEDIPREDICT_DATABASE_ENABLED=true and configure "
+                "MEDIPREDICT_AUTH_SECRET_KEY to enable the demo account."
+            )
+        auth.ensure_demo_user(SessionLocal)
     yield
 
 
@@ -185,6 +194,16 @@ async def protect_api(request: Request, call_next):
                 content={"detail": "Sign in to continue."},
             )
         request.state.auth_user = principal
+
+        if (
+            principal.role == "demo"
+            and request.method not in {"GET", "HEAD"}
+            and path != "/api/v1/auth/logout"
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "The shared demo account has read-only access."},
+            )
 
         if request.method not in {"GET", "HEAD"}:
             csrf_token = request.headers.get("x-csrf-token")

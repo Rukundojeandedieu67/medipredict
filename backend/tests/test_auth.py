@@ -125,6 +125,43 @@ def test_login_rejects_bad_credentials_and_csrf_is_required(monkeypatch, tmp_pat
         test_engine.dispose()
 
 
+def test_shared_demo_account_is_read_only_and_cannot_create_users(
+    monkeypatch, tmp_path
+):
+    client, test_engine, _test_session = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "auth_demo_email", "demo@example.org")
+    monkeypatch.setattr(settings, "auth_demo_password", "shared demo password 2026")
+    monkeypatch.setattr(main, "load_rows", lambda: [])
+    try:
+        with client:
+            login = client.post(
+                "/api/v1/auth/login",
+                json={
+                    "email": "demo@example.org",
+                    "password": "shared demo password 2026",
+                },
+            )
+            assert login.status_code == 200
+            assert login.json()["user"]["role"] == "demo"
+            csrf_headers = {"X-CSRF-Token": login.json()["csrf_token"]}
+            assert client.get("/api/v1/inventory/summary").status_code == 200
+            forbidden = client.post(
+                "/api/v1/auth/users",
+                json={
+                    "email": "new.user@example.org",
+                    "password": "a sufficiently long password",
+                },
+                headers=csrf_headers,
+            )
+            assert forbidden.status_code == 403
+            assert "read-only" in forbidden.json()["detail"]
+            assert client.post(
+                "/api/v1/auth/logout", headers=csrf_headers
+            ).status_code == 200
+    finally:
+        test_engine.dispose()
+
+
 @pytest.mark.parametrize(
     ("database_enabled", "secret_key", "message"),
     [

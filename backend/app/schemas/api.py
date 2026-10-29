@@ -17,7 +17,7 @@ class CreateUserRequest(BaseModel):
 class AuthUserResponse(BaseModel):
     id: str
     email: str
-    role: Literal["admin", "user"]
+    role: Literal["admin", "user", "demo"]
 
 
 class AuthSessionResponse(BaseModel):

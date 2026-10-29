@@ -15,7 +15,7 @@ type View = "overview" | "inventory" | "alerts" | "risk" | "transfers" | "trust"
 interface AuthUser {
   id: string;
   email: string;
-  role: "admin" | "user";
+  role: "admin" | "user" | "demo";
 }
 
 interface AuthSession {
@@ -463,7 +463,7 @@ export function App() {
         <div className="workspace-label">SUPPLY CHAIN WORKSPACE</div>
 
         <nav className="main-nav" aria-label="Main Navigation">
-          {navItems.map((item) => {
+          {navItems.filter((item) => authUser?.role !== "demo" || item.id !== "upload").map((item) => {
             const count = item.badgeCount ? item.badgeCount(alerts, transfers) : null;
             const isActive = view === item.id;
             return (
@@ -498,7 +498,13 @@ export function App() {
             <div className="profile-avatar">RW</div>
             <div className="profile-details">
               <strong>{authUser?.email}</strong>
-              <small>{authUser?.role === "admin" ? "Administrator" : "Workspace user"}</small>
+              <small>
+                {authUser?.role === "admin"
+                  ? "Administrator"
+                  : authUser?.role === "demo"
+                    ? "Read-only demo"
+                    : "Workspace user"}
+              </small>
             </div>
           </div>
           {authActionError && <p className="auth-inline-error" role="alert">{authActionError}</p>}

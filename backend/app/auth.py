@@ -202,3 +202,36 @@ def ensure_initial_admin(session_factory: Callable[[], Session]) -> None:
             )
         )
         db.commit()
+
+
+def ensure_demo_user(session_factory: Callable[[], Session]) -> None:
+    email = settings.auth_demo_email
+    password = settings.auth_demo_password
+    if not email and not password:
+        return
+    if not email or not password:
+        raise RuntimeError(
+            "Set both MEDIPREDICT_AUTH_DEMO_EMAIL and "
+            "MEDIPREDICT_AUTH_DEMO_PASSWORD to enable the demo account."
+        )
+    if len(password) < 12:
+        raise RuntimeError("The demo password must be at least 12 characters.")
+    normalized_email = normalize_email(email)
+    with session_factory() as db:
+        existing = db.query(AuthUser).filter_by(email=normalized_email).first()
+        if existing is not None:
+            if existing.role != "demo":
+                raise RuntimeError(
+                    "The configured demo email already belongs to a non-demo "
+                    "account; refusing to change its role or password."
+                )
+            return
+        db.add(
+            AuthUser(
+                id=secrets.token_hex(18),
+                email=normalized_email,
+                password_hash=hash_password(password),
+                role="demo",
+            )
+        )
+        db.commit()

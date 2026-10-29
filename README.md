@@ -86,7 +86,9 @@ To use Aiven PostgreSQL (and Cloudflare R2 once its credentials are available):
    npm run dev
    ```
 
-6. Open `http://localhost:5173` and sign in with the bootstrap administrator account. Admins can create standard user accounts from the sidebar; public registration is disabled. API docs are at `http://localhost:8000/docs`, and the OpenAPI schema is at `http://localhost:8000/openapi.json`.
+6. Open `http://localhost:5173`. The optional shared demo login is `demo@medipredict.rw` / `RwandaDemo-ReadOnly-2026!`. It is read-only and cannot create users. For Render, add `MEDIPREDICT_AUTH_DEMO_EMAIL=demo@medipredict.rw` and `MEDIPREDICT_AUTH_DEMO_PASSWORD=RwandaDemo-ReadOnly-2026!` under the service's Environment settings. These are public demo credentials; anyone can use them to view the dashboard. Do not use them for an administrator.
+
+   Set `MEDIPREDICT_AUTH_INITIAL_ADMIN_EMAIL` and `MEDIPREDICT_AUTH_INITIAL_ADMIN_PASSWORD` separately to private credentials in Render. Admins can create standard accounts from the sidebar; public registration is disabled. Never publish or reuse an admin password. API docs are at `http://localhost:8000/docs`, and the OpenAPI schema is at `http://localhost:8000/openapi.json`.
 
 Protected dashboard and CSV endpoints require the database for user accounts. With `MEDIPREDICT_DATABASE_ENABLED=false`, only health and auth-setup endpoints remain available; the dashboard cannot be used in that mode.
 
