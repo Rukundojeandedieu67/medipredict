@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from .config import settings
@@ -25,6 +26,14 @@ class Base(DeclarativeBase):
 
 
 def get_db():
+    if not settings.database_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "This feature requires the database. "
+                "Set MEDIPREDICT_DATABASE_ENABLED=true to enable it."
+            ),
+        )
     session = SessionLocal()
     try: yield session
     finally: session.close()

@@ -57,11 +57,15 @@ from .validation import ValidationConfig, validate_inventory_csv
 logger = logging.getLogger(__name__)
 MAX_CSV_BYTES = 20 * 1024 * 1024
 CSV_COLUMNS = {"facility_name": "facility", "district": "district", "province": "province", "facility_type": "facility_type", "medicine_code": "medicine_code", "medicine_name": "medicine", "end_of_month_stock_units": "stock_units", "avg_daily_consumption_units": "daily_consumption", "nisr_under_5_population": "under5_population", "nisr_poverty_rate_pct": "poverty_rate", "nisr_malaria_prevalence_pct": "malaria_prevalence", "rainy_season_active": "rainy_season", "reporting_month": "reporting_date"}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if engine.dialect.name == "sqlite":
+    if settings.database_enabled and engine.dialect.name == "sqlite":
         Base.metadata.create_all(bind=engine)
     yield
+
+
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -103,7 +107,7 @@ def provenance_summary(
     )
 
 @app.get("/api/v1/inventory/summary", response_model=Summary)
-async def inventory_summary(db: Session = Depends(get_db)):
+async def inventory_summary():
     rows = load_rows()
     if not rows: return Summary(facilities=0,districts=0,medicines=0,critical=0,moderate=0,stable=0,unknown=0,stock_units=0,reporting_date="—",data_source=None,is_synthetic=None,provenance_status="uploaded_unverified")
     data_source, is_synthetic, provenance_status = provenance_summary(rows)

@@ -2,18 +2,39 @@
 
 MediPredict monitors medicine availability through a React dashboard and FastAPI service. Inventory, consumption, and risk predictions currently use synthetic demonstration data; district indicators are unverified seed values. Do not use dashboard outputs for operational decisions.
 
-For the staged Render, Vercel, and private AWS S3 deployment approach, see the [deployment plan](docs/deployment_plan.md). Hosting is separate from the local setup below; local development continues to use SQLite, local files, and the Vite API proxy.
+For the staged Render, Vercel, and private AWS S3 deployment approach, see the [deployment plan](docs/deployment_plan.md). Hosting is separate from local development. Local development can use Aiven PostgreSQL and Cloudflare R2, or run the CSV-only dashboard without a database.
 
 ## Run locally
 
-1. Copy `backend/.env.example` to `backend/.env` and adjust settings if needed.
-2. Copy `ml_engine/.env.example` to `ml_engine/.env` and adjust paths if needed.
-3. Install the API dependencies: `python -m pip install -r backend/requirements.txt`.
-4. Install the model pipeline dependencies: `python -m pip install -r ml_engine/requirements.txt`.
-5. The legacy trainer is deprecated and must not be used. After an approved, provenance-registered upload, build features with `python -m ml.build_dataset <dataset-id>`, then train with `python -m ml.train <feature-build-id>`. This writes versioned evaluation artifacts under `ml/models/`; model serving is not enabled.
-6. Start the API from the repository root: `uvicorn backend.app.main:app --reload --port 8000`.
-7. In another terminal, start the frontend: `cd frontend`, `npm install`, then `npm run dev`.
-8. Open the dashboard at `http://localhost:5173`. Swagger UI is at `http://localhost:8000/docs`, and the OpenAPI schema is available at `http://localhost:8000/openapi.json`.
+To use Aiven PostgreSQL and Cloudflare R2:
+
+1. Copy `backend/.env.example` to `backend/.env`. Uncomment and fill in the Aiven connection URL, then set the R2 backend, bucket, account endpoint, access credentials, and dashboard CSV object key. URL-encode special characters in the Aiven password. Keep credentials in the ignored `.env` file; never commit them or put them in frontend settings.
+2. Upload the existing dashboard CSV to your R2 bucket and set `MEDIPREDICT_DASHBOARD_DATA_KEY` to its object key. R2 replaces the local dashboard CSV source when `MEDIPREDICT_STORAGE_BACKEND=s3`.
+3. If the Aiven database is new and empty, first confirm the connection URL points to the intended database, then apply the existing schema from the repository root:
+
+   ```powershell
+   .\backend\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
+   ```
+
+   Do not run this against a database containing existing application tables without checking its schema and migration state first.
+4. Start the API from the repository root. Settings are loaded from `backend/.env`:
+
+   ```powershell
+   .\backend\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload --port 8000
+   ```
+
+5. In another PowerShell terminal, start the frontend:
+
+   ```powershell
+   Set-Location frontend
+   npm run dev
+   ```
+
+6. Open `http://localhost:5173`. API docs are at `http://localhost:8000/docs`, and the OpenAPI schema is at `http://localhost:8000/openapi.json`.
+
+To run only the local CSV dashboard without connecting to a database or R2, start the API in a PowerShell terminal at the repository root with `$env:MEDIPREDICT_DATABASE_ENABLED = "false"` followed by `.\backend\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload --port 8000`. Start the frontend using the steps above. Database-backed features return HTTP 503 in this mode.
+
+Install dependencies only if they are missing: `python -m pip install -r backend/requirements.txt` for the API, or `npm install` in `frontend/`. The legacy trainer is deprecated and must not be used; model serving is not enabled.
 
 ## API endpoints
 
@@ -26,7 +47,7 @@ All application routes use the `/api/v1` prefix:
 - `GET /transfers/recommendations` — retrieve suggested stock transfers.
 - `GET /analytics/trust-metrics` — retrieve model metrics and feature importance.
 
-The API reads `datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv` by default. Configure `MEDIPREDICT_CSV_PATH`, `MEDIPREDICT_DATABASE_URL`, `MEDIPREDICT_MODEL_PATH`, and `MEDIPREDICT_CORS_ORIGINS` in `backend/.env` to use deployment resources or permit browser clients hosted on other origins. Relative API file paths and SQLite database paths are resolved from the repository root. Existing repository-root `.env` settings remain supported, with `backend/.env` taking precedence. CSV uploads must include the dataset headers shown in the frontend upload view. Phase 4 training requires the output of the validated training-upload and feature-building workflow; the legacy `ML_ENGINE_TRAINING_DATA_PATH` trainer is disabled by default.
+The API reads `datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv` by default. Set `MEDIPREDICT_DATABASE_ENABLED=true` to enable the existing SQLite-backed dataset registry, provenance administration, and notification dispatch; the default remains true for deployments. Configure `MEDIPREDICT_CSV_PATH`, `MEDIPREDICT_DATABASE_URL`, `MEDIPREDICT_MODEL_PATH`, and `MEDIPREDICT_CORS_ORIGINS` when needed. Relative API file paths and SQLite database paths are resolved from the repository root. Existing repository-root `.env` settings remain supported, with `backend/.env` taking precedence. CSV uploads must include the dataset headers shown in the frontend upload view. Phase 4 training requires the output of the validated training-upload and feature-building workflow; the legacy `ML_ENGINE_TRAINING_DATA_PATH` trainer is disabled by default.
 
 ## Where AI runs
 

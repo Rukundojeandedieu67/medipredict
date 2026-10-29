@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     app_name: str = "MediPredict Rwanda"
     database_url: str = f"sqlite:///{(ROOT / 'backend' / 'medipredict.db').as_posix()}"
+    database_enabled: bool = True
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     storage_backend: Literal["local", "s3"] = "local"
     object_store_bucket: str | None = None
