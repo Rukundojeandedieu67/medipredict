@@ -356,7 +356,7 @@ export function App() {
             <span className={`status-indicator-dot ${loading ? "loading" : apiConnected ? "online" : "offline"}`} />
             <div className="status-info">
               <strong>{loading ? "Checking API…" : apiConnected ? "API Connected" : "API Offline"}</strong>
-              <small>{apiConnected ? "FastAPI service active" : "Port 8000 unreachable"}</small>
+              <small>{apiConnected ? "Backend health check passed" : "Backend health check failed"}</small>
             </div>
           </div>
 
@@ -401,14 +401,22 @@ export function App() {
 
         {/* Page Inner Content */}
         <div className="page-content">
-          {/* Global API Connection Errors Banner */}
+          {/* Global dashboard availability errors */}
           {errors.length > 0 && (
             <div className="global-error-banner" role="alert">
               <Icon name="alert-triangle" size={20} />
               <div className="error-body">
-                <strong>Some dashboard endpoints could not be reached:</strong>
+                <strong>
+                  {apiConnected
+                    ? "The API is running, but some dashboard data is unavailable:"
+                    : "The backend API could not be reached:"}
+                </strong>
                 <p>{errors.join(" · ")}</p>
-                <small>Ensure FastAPI is running on port 8000 (<code>uvicorn backend.app.main:app --port 8000</code>).</small>
+                <small>
+                  {apiConnected
+                    ? "Check the backend logs and storage configuration. For Cloudflare R2, confirm the dashboard object key matches an existing CSV in the configured bucket."
+                    : "Check that the backend service is running and that the frontend is configured to reach its API URL."}
+                </small>
               </div>
               <button
                 type="button"

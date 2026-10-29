@@ -119,7 +119,13 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins, allow
 def load_rows() -> list[dict]:
     try:
         content = read_dashboard_csv()
-    except (ObjectStorageError, StorageConfigurationError) as exc:
+    except StorageConfigurationError as exc:
+        logger.error("Dashboard storage configuration error: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+    except ObjectStorageError as exc:
         logger.exception("Could not load dashboard data.")
         raise HTTPException(
             status_code=503,

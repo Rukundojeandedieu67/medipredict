@@ -322,6 +322,22 @@ def test_dashboard_api_maps_storage_failure_to_service_unavailable(monkeypatch):
     assert error.value.detail == "Dashboard data is not available from configured storage."
 
 
+def test_dashboard_api_surfaces_safe_storage_configuration_error(monkeypatch, caplog):
+    detail = "MEDIPREDICT_DASHBOARD_DATA_KEY must identify the dashboard CSV object."
+
+    def fail_read():
+        raise StorageConfigurationError(detail)
+
+    monkeypatch.setattr(main, "read_dashboard_csv", fail_read)
+
+    with pytest.raises(main.HTTPException) as error:
+        main.load_rows()
+
+    assert error.value.status_code == 503
+    assert error.value.detail == detail
+    assert detail in caplog.text
+
+
 def test_dashboard_api_serves_synthetic_r2_dataset_to_ui(monkeypatch):
     content = (
         "reporting_month,facility_name,facility_type,district,province,"
