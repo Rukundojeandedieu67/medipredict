@@ -9,12 +9,13 @@ from zipfile import ZipFile
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app import main, models
 from backend.app.config import settings
 from backend.app.database import Base
 from ml import archive_dashboard_csv, train_registered_dataset
+from ml.synthetic import generate_synthetic_supply_history
 
 
 def _read_tampered_object(key, *, max_bytes, backend):
@@ -227,12 +228,171 @@ def test_manual_training_stores_candidate_and_feature_archives_in_r2(
     assert release.is_synthetic is True
     assert release.model_validated is False
     assert release.metadata_json["training_policy"] == "manual_review_required"
+    assert release.metadata_json["storage_backend"] == "s3"
     assert release.artifact_key in objects
     assert release.metadata_json["feature_bundle_key"] in objects
     with ZipFile(io.BytesIO(objects[release.artifact_key])) as bundle:
         assert {"model.joblib", "metadata.json", "report.md"} == set(bundle.namelist())
     with ZipFile(io.BytesIO(objects[release.metadata_json["feature_bundle_key"]])) as bundle:
         assert {"features.csv", "metadata.json", "report.md"} == set(bundle.namelist())
+
+
+def test_automatic_training_records_candidate_status(monkeypatch, tmp_path):
+    engine = create_engine(f"sqlite:///{(tmp_path / 'automatic-training.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    dataset_id = "v1-20261029T000000Z-" + "e" * 32
+    with factory() as session:
+        session.add(
+            models.DatasetRecord(
+                dataset_id=dataset_id,
+                sha256="f" * 64,
+                object_key=f"v1/{dataset_id}/data.csv",
+                storage_backend="local",
+                byte_size=10,
+                row_count=100,
+                date_start="2025-01-01",
+                date_end="2026-01-01",
+                data_frequency="monthly",
+                is_synthetic=False,
+                data_source="uploaded",
+                metadata_json={"dataset_id": dataset_id},
+            )
+        )
+        session.commit()
+
+    release = models.ModelRelease(
+        model_version="20261029T000000Z-automatic-candidate",
+        source_dataset_id=dataset_id,
+        source_dataset_sha256="f" * 64,
+        artifact_key="candidate.zip",
+        model_sha256="a" * 64,
+        metadata_json={},
+        is_synthetic=False,
+        model_validated=False,
+        release_status="candidate",
+    )
+    monkeypatch.setattr("backend.app.database.SessionLocal", factory)
+    monkeypatch.setattr(
+        train_registered_dataset,
+        "train_registered_dataset",
+        lambda requested_id, session: release,
+    )
+
+    main._run_automatic_training(dataset_id)
+
+    with factory() as session:
+        events = session.query(models.DatasetEvent).all()
+    events_by_type = {event.event_type: event for event in events}
+    assert set(events_by_type) == {"training_started", "training_completed"}
+    assert events_by_type["training_completed"].details == {
+        "model_version": release.model_version,
+        "model_validated": False,
+        "is_synthetic": False,
+        "release_status": "candidate",
+    }
+    engine.dispose()
+
+
+def test_automatic_training_builds_and_stores_local_candidate(
+    monkeypatch,
+    tmp_path,
+):
+    engine = create_engine(f"sqlite:///{(tmp_path / 'automatic-local.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    uploads_root = tmp_path / "uploads"
+    monkeypatch.setattr(settings, "uploads_path", uploads_root)
+    monkeypatch.setattr(settings, "database_enabled", True)
+    monkeypatch.setattr(settings, "storage_backend", "local")
+    monkeypatch.setattr("backend.app.database.SessionLocal", factory)
+
+    source = generate_synthetic_supply_history(
+        facilities=48,
+        periods=72,
+        seed=17,
+        frequency="monthly",
+    )
+    dataset_id = "v1-20261029T000000Z-" + "f" * 32
+    dataset_dir = uploads_root / "v1" / dataset_id
+    dataset_dir.mkdir(parents=True)
+    data_path = dataset_dir / "data.csv"
+    source.to_csv(data_path, index=False)
+    digest = hashlib.sha256(data_path.read_bytes()).hexdigest()
+    (dataset_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "dataset_id": dataset_id,
+                "sha256": digest,
+                "row_count": len(source),
+                "date_range": {
+                    "start": source["date"].min(),
+                    "end": source["date"].max(),
+                },
+                "is_synthetic": True,
+                "data_source": "uploaded",
+                "data_frequency": "monthly",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with factory() as session:
+        session.add(
+            models.DatasetRecord(
+                dataset_id=dataset_id,
+                sha256=digest,
+                object_key=f"v1/{dataset_id}/data.csv",
+                storage_backend="local",
+                byte_size=data_path.stat().st_size,
+                row_count=len(source),
+                date_start=source["date"].min(),
+                date_end=source["date"].max(),
+                data_frequency="monthly",
+                is_synthetic=True,
+                data_source="uploaded",
+                metadata_json={
+                    "dataset_id": dataset_id,
+                    "sha256": digest,
+                    "row_count": len(source),
+                    "date_range": {
+                        "start": source["date"].min(),
+                        "end": source["date"].max(),
+                    },
+                    "is_synthetic": True,
+                    "data_source": "uploaded",
+                    "data_frequency": "monthly",
+                },
+            )
+        )
+        session.add(
+            models.DatasetEvent(
+                event_id="queued-local-training",
+                dataset_id=dataset_id,
+                dataset_sha256=digest,
+                event_type="training_queued",
+                actor_subject="system",
+                details={"is_synthetic": True},
+            )
+        )
+        session.commit()
+
+    main._run_automatic_training(dataset_id)
+
+    with factory() as session:
+        release = session.query(models.ModelRelease).one()
+        events = session.query(models.DatasetEvent).all()
+    statuses = {event.event_type for event in events}
+    assert statuses == {
+        "training_queued",
+        "training_started",
+        "training_completed",
+    }
+    assert release.source_dataset_id == dataset_id
+    assert release.is_synthetic is True
+    assert release.model_validated is False
+    assert (uploads_root / release.metadata_json["model_bundle_key"]).is_file()
+    assert (uploads_root / release.metadata_json["feature_bundle_key"]).is_file()
+    engine.dispose()
 
 
 def test_model_artifact_download_checks_hash_and_requires_admin(

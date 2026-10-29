@@ -10,7 +10,7 @@ import tempfile
 import uuid
 
 import pandas as pd
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -50,6 +50,7 @@ from .schemas.api import (
     RiskRecord,
     TransferCandidate,
     TrainingUploadResult,
+    TrainingJobStatus,
     TrustMetrics,
 )
 from .validation import ValidationConfig, validate_inventory_csv
@@ -467,6 +468,7 @@ def _resolve_stored_provenance(
 
 @app.post("/api/v1/data/training-upload", response_model=TrainingUploadResult)
 async def training_upload(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
     x_uploader: str | None = Header(default=None, alias="X-Uploader"),
@@ -540,6 +542,14 @@ async def training_upload(
             actor_subject=uploader_identity,
             details={"byte_size": len(content), "row_count": report.row_count},
         )
+        _store_dataset_event(
+            db,
+            dataset_id=dataset_id,
+            dataset_sha256=digest,
+            event_type="training_queued",
+            actor_subject="system",
+            details={"is_synthetic": synthetic},
+        )
         db.commit()
     except (ObjectStorageError, StorageConfigurationError) as exc:
         db.rollback()
@@ -571,6 +581,7 @@ async def training_upload(
         logger.exception("Could not register uploaded dataset.")
         raise HTTPException(503, "Dataset metadata could not be saved.") from exc
 
+    background_tasks.add_task(_run_automatic_training, dataset_id)
     return TrainingUploadResult(
         dataset_id=dataset_id,
         sha256=digest,
@@ -588,7 +599,48 @@ async def training_upload(
         ),
         provenance_status=_resolve_stored_provenance(record, db)["provenance_status"],
         verification_summary=None,
+        training_status="queued",
     )
+
+
+def _latest_training_event(dataset_id: str, db: Session) -> models.DatasetEvent | None:
+    return db.scalars(
+        select(models.DatasetEvent)
+        .where(
+            models.DatasetEvent.dataset_id == dataset_id,
+            models.DatasetEvent.event_type.in_(
+                (
+                    "training_queued",
+                    "training_started",
+                    "training_completed",
+                    "training_failed",
+                )
+            ),
+        )
+        .order_by(models.DatasetEvent.occurred_at.desc(), models.DatasetEvent.event_id.desc())
+        .limit(1)
+    ).first()
+
+
+def _training_status_fields(
+    dataset_id: str,
+    db: Session,
+) -> dict[str, object]:
+    event = _latest_training_event(dataset_id, db)
+    if event is None:
+        return {}
+    status_by_event = {
+        "training_queued": "queued",
+        "training_started": "running",
+        "training_completed": "completed",
+        "training_failed": "failed",
+    }
+    return {
+        "training_status": status_by_event[event.event_type],
+        "candidate_model_version": event.details.get("model_version"),
+        "candidate_model_validated": event.details.get("model_validated"),
+        "training_error": event.details.get("error"),
+    }
 
 
 def _dataset_response(dataset_id: str, db: Session) -> DatasetDetail:
@@ -616,6 +668,7 @@ def _dataset_response(dataset_id: str, db: Session) -> DatasetDetail:
             verification=provenance["verification"],
             verification_summary=provenance["verification_summary"],
             warning=provenance["warning"],
+            **_training_status_fields(dataset_id, db),
         )
 
     dataset_dir = settings.uploads_path / "v1" / dataset_id
@@ -643,6 +696,7 @@ def _dataset_response(dataset_id: str, db: Session) -> DatasetDetail:
         verification=provenance["verification"],
         verification_summary=provenance["verification_summary"],
         warning=provenance["warning"],
+        **_training_status_fields(dataset_id, db),
     )
 
 
@@ -833,7 +887,7 @@ def _download_model_artifact(
         content = read_object(
             object_key,
             max_bytes=MAX_TRAINING_ARTIFACT_BYTES,
-            backend="s3",
+            backend=metadata.get("storage_backend", "s3"),
         )
     except (ObjectStorageError, StorageConfigurationError) as exc:
         logger.exception(
@@ -917,6 +971,92 @@ async def dataset_detail(
 ):
     _require_admin(x_admin_api_key, operation="Dataset detail")
     return _dataset_response(dataset_id, db)
+
+
+@app.get(
+    "/api/v1/data/datasets/{dataset_id}/training-status",
+    response_model=TrainingJobStatus,
+)
+async def dataset_training_status(
+    dataset_id: str,
+    x_admin_api_key: str | None = Header(default=None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_api_key, operation="Training status")
+    record = _dataset_record(dataset_id, db)
+    if record is None:
+        raise HTTPException(404, "Registered dataset not found.")
+    event = _latest_training_event(dataset_id, db)
+    if event is None:
+        raise HTTPException(404, "No automatic training job is registered for this dataset.")
+    status_by_event = {
+        "training_queued": "queued",
+        "training_started": "running",
+        "training_completed": "completed",
+        "training_failed": "failed",
+    }
+    return TrainingJobStatus(
+        dataset_id=dataset_id,
+        status=status_by_event[event.event_type],
+        model_version=event.details.get("model_version"),
+        model_validated=event.details.get("model_validated"),
+        is_synthetic=event.details.get("is_synthetic", record.is_synthetic),
+        error=event.details.get("error"),
+        updated_at=event.occurred_at.isoformat(),
+    )
+
+
+def _run_automatic_training(dataset_id: str) -> None:
+    from .database import SessionLocal
+    from ml.train_registered_dataset import train_registered_dataset
+
+    with SessionLocal() as db:
+        record = _dataset_record(dataset_id, db)
+        if record is None:
+            logger.error("Automatic training has no registered dataset: %s", dataset_id)
+            return
+        dataset_hash = record.sha256
+        _store_dataset_event(
+            db,
+            dataset_id=dataset_id,
+            dataset_sha256=dataset_hash,
+            event_type="training_started",
+            actor_subject="system",
+            details={"is_synthetic": record.is_synthetic},
+        )
+        db.commit()
+        try:
+            release = train_registered_dataset(dataset_id, db)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Automatic training failed for dataset %s.", dataset_id)
+            _store_dataset_event(
+                db,
+                dataset_id=dataset_id,
+                dataset_sha256=dataset_hash,
+                event_type="training_failed",
+                actor_subject="system",
+                details={
+                    "is_synthetic": record.is_synthetic,
+                    "error": str(exc)[:1000],
+                },
+            )
+            db.commit()
+            return
+        _store_dataset_event(
+            db,
+            dataset_id=dataset_id,
+            dataset_sha256=dataset_hash,
+            event_type="training_completed",
+            actor_subject="system",
+            details={
+                "model_version": release.model_version,
+                "model_validated": release.model_validated,
+                "is_synthetic": release.is_synthetic,
+                "release_status": release.release_status,
+            },
+        )
+        db.commit()
 
 
 @app.post(

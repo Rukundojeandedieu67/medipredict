@@ -43,8 +43,6 @@ def _load_registered_dataset(
     if digest != metadata.get("sha256"):
         raise ValueError("Dataset content hash does not match the training-upload registry.")
     frame = pd.read_csv(data_path, dtype=str, keep_default_na=False)
-    if metadata.get("data_source") != "uploaded":
-        raise ValueError("Dataset registry data_source must be 'uploaded'.")
     if metadata.get("row_count") != len(frame):
         raise ValueError("Dataset row count does not match the training-upload registry.")
     if "is_synthetic" not in frame:
@@ -60,6 +58,11 @@ def _load_registered_dataset(
     )
     if metadata.get("is_synthetic") is not expected_synthetic:
         raise ValueError("Dataset synthetic flag does not match the training-upload registry.")
+    data_source = metadata.get("data_source")
+    if data_source not in ("uploaded", "synthetic_generated"):
+        raise ValueError("Dataset registry data_source is not supported.")
+    if data_source == "synthetic_generated" and expected_synthetic is not True:
+        raise ValueError("Generated synthetic datasets must be marked is_synthetic=true.")
     return frame, metadata, digest
 
 
@@ -218,7 +221,7 @@ def build_dataset(
         ),
         "dataset_id": dataset_id,
         "dataset_hash": digest,
-        "data_source": "uploaded",
+        "data_source": registry["data_source"],
         "provenance_status": provenance["provenance_status"],
         "verification": provenance["verification"],
         "verified_dataset_hash": (

@@ -49,6 +49,8 @@ All application routes use the `/api/v1` prefix:
 
 The API reads `datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv` by default. Set `MEDIPREDICT_DATABASE_ENABLED=true` to enable the existing SQLite-backed dataset registry, provenance administration, and notification dispatch; the default remains true for deployments. Configure `MEDIPREDICT_CSV_PATH`, `MEDIPREDICT_DATABASE_URL`, `MEDIPREDICT_MODEL_PATH`, and `MEDIPREDICT_CORS_ORIGINS` when needed. Relative API file paths and SQLite database paths are resolved from the repository root. Existing repository-root `.env` settings remain supported, with `backend/.env` taking precedence. CSV uploads must include the dataset headers shown in the frontend upload view. Phase 4 training requires the output of the validated training-upload and feature-building workflow; the legacy `ML_ENGINE_TRAINING_DATA_PATH` trainer is disabled by default.
 
+To run the current feature-building and training pipeline locally before real training data is available, run `.\backend\.venv\Scripts\python.exe -m ml.train_synthetic` from the repository root. It generates and retains a synthetic source dataset, builds features, and writes a candidate model under `ml/models/`. The source, feature table, and model metadata are marked synthetic; reported evaluation is only a pipeline smoke test, and the candidate cannot be promoted or served. Use the protected training-upload workflow below once approved real data is available.
+
 ## Aiven and Cloudflare R2 dataset workflow
 
 Aiven PostgreSQL stores registry metadata, hashes, and archive/model records. CSV sources, verification evidence, feature bundles, and model bundles are stored in the configured Cloudflare R2 bucket. Configure `MEDIPREDICT_DATABASE_ENABLED=true`, the Aiven `MEDIPREDICT_DATABASE_URL`, `MEDIPREDICT_STORAGE_BACKEND=s3`, and all R2 settings in the ignored `backend/.env`. After archiving the dashboard CSV, set `MEDIPREDICT_DASHBOARD_DATA_KEY` to the R2 key printed by the archive command so the dashboard reads that same object.
@@ -67,14 +69,15 @@ This applies schema migrations only; it does not connect to or upload data from 
 
 The existing dashboard CSV is explicitly synthetic, has only 10 monthly periods, and does not have the training pipeline's required schema or minimum history. It is archived for reference only and must not be used to train or validate a production model. Do not convert it into training labels or treat its predictions as real-world results.
 
-For a separate eligible dataset, use the protected `POST /api/v1/data/training-upload` endpoint. It stores the validated source CSV and registry metadata; it does not start training. Then manually run a candidate job against the returned dataset ID:
+For an inventory-history CSV, include the required columns and the correct `is_synthetic` value, then submit it through the protected `POST /api/v1/data/training-upload` endpoint. A successful upload automatically queues feature building and candidate training. The response includes `training_status: "queued"`. Check progress and the final candidate using the protected status endpoint:
 
 ```powershell
 $datasetId = "paste-the-dataset-id-from-the-upload-response"
-.\backend\.venv\Scripts\python.exe -m ml.train_registered_dataset $datasetId
+Invoke-RestMethod "http://localhost:8000/api/v1/data/datasets/$datasetId/training-status" `
+  -Headers @{ "X-Admin-API-Key" = $env:MEDIPREDICT_ADMIN_API_KEY }
 ```
 
-The job reads and verifies the registered CSV from R2, uses the existing time-aware feature/training pipeline, and writes hashed feature and candidate-model bundles to R2 with their registry metadata in Aiven. It does not automatically promote or serve the candidate. Synthetic candidates remain labeled synthetic and cannot be promoted or served.
+The job verifies the registered CSV hash, uses the existing time-aware feature/training pipeline, and writes SHA-256-checked candidate bundles to configured local storage or R2 with release metadata in the database. Training status is also included in the protected dataset detail response. Training failures are recorded with an error message. Candidates are never automatically promoted or served; synthetic and unverified sources retain their provenance labels and cannot pass the promotion gate.
 
 The admin-key-protected retrieval endpoints are:
 
@@ -110,7 +113,7 @@ docker compose up --build
 
 Open the dashboard at `http://localhost:8080` and API documentation at `http://localhost:8000/docs`. To stop the services while retaining their data, run `docker compose down` (do not add `-v` unless you intend to remove the persistent volume).
 
-Training data intake at `POST /api/v1/data/training-upload` requires `MEDIPREDICT_ADMIN_API_KEY` to be set in `.env`; send that key as `X-Admin-API-Key`. The response contains a registered dataset ID. Run feature building first:
+Training data intake at `POST /api/v1/data/training-upload` requires `MEDIPREDICT_ADMIN_API_KEY` to be set in `.env`; send that key as `X-Admin-API-Key`. A successful upload automatically queues candidate training. Check its status at `GET /api/v1/data/datasets/{dataset_id}/training-status`. To manually rebuild features or rerun training, use the one-off jobs below.
 
 ```powershell
 $env:FEATURE_DATASET_ID = "v1-<timestamp>-<dataset-id>"

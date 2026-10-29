@@ -26,7 +26,7 @@ API routes are under `/api/v1`. The development frontend uses `http://localhost:
 
 The current legacy model artifact is not accepted as validated: it lacks required time-based validation metadata and an artifact SHA-256. Assessments therefore use the explicitly labeled rule-based days-of-cover fallback, and confidence is not reported. Do not run the legacy training script or present its metrics as predictive performance.
 
-Uploads to `POST /api/v1/data/assess-csv` are assessed in memory and are not persisted to `DailyStockLog` or `Prediction`. They must include `is_synthetic` with `true` or `false`; provenance is not inferred. `POST /api/v1/data/validate-csv` only returns a structured validation report. `POST /api/v1/data/training-upload` is a distinct, admin-key-protected intake route that stores a validated dataset and metadata but does not train.
+Uploads to `POST /api/v1/data/assess-csv` are assessed in memory and are not persisted to `DailyStockLog` or `Prediction`. They must include `is_synthetic` with `true` or `false`; provenance is not inferred. `POST /api/v1/data/validate-csv` only returns a structured validation report. `POST /api/v1/data/training-upload` is a distinct, admin-key-protected intake route that stores a validated dataset and metadata, then queues candidate training.
 
 When `MEDIPREDICT_DATABASE_ENABLED=false`, the CSV assessment and validation endpoints remain available, while training upload, dataset registry/provenance administration, and alert notification dispatch return HTTP 503. Set it to `true` (the default) to enable those database-backed features.
 
@@ -48,11 +48,11 @@ Archive the current dashboard CSV unchanged (it is synthetic and not training-el
 .\backend\.venv\Scripts\python.exe -m ml.archive_dashboard_csv
 ```
 
-The API's `POST /api/v1/data/training-upload` stores a validated, eligible source CSV in R2 and records its metadata in Aiven. It does not train automatically. To manually build and register a candidate from the returned dataset ID:
+The API's `POST /api/v1/data/training-upload` stores a validated source CSV and its metadata in the configured database and local storage or R2. Every successful upload automatically queues candidate training. Check `GET /api/v1/data/datasets/{dataset_id}/training-status` with the admin key for queued/running/completed/failed status and the candidate model version. Candidate bundles are hash-checked and stored in the configured object storage. Training never automatically promotes or serves a candidate.
 
 ```powershell
-$datasetId = "paste-the-dataset-id-from-the-upload-response"
-.\backend\.venv\Scripts\python.exe -m ml.train_registered_dataset $datasetId
+Invoke-RestMethod "http://localhost:8000/api/v1/data/datasets/$datasetId/training-status" `
+  -Headers @{ "X-Admin-API-Key" = $env:MEDIPREDICT_ADMIN_API_KEY }
 ```
 
-Source datasets, the archived dashboard CSV, feature tables, and candidate bundles can be retrieved through admin-key-protected endpoints documented in the repository root README. Downloads are SHA-256 checked. Candidate training does not promote or serve a model, and the current synthetic dashboard CSV cannot be converted into a valid training source.
+Source datasets, the archived dashboard CSV, feature tables, and candidate bundles can be retrieved through admin-key-protected endpoints documented in the repository root README. Downloads are SHA-256 checked. Synthetic and unverified candidates remain blocked from promotion and serving.

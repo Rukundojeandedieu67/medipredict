@@ -36,6 +36,10 @@ class DatasetDetail(BaseModel):
     verification: dict | None = None
     verification_summary: VerificationSummary | None = None
     warning: str | None = None
+    training_status: Literal["queued", "running", "completed", "failed"] | None = None
+    candidate_model_version: str | None = None
+    candidate_model_validated: bool | None = None
+    training_error: str | None = None
 
 
 class Summary(BaseModel):
@@ -171,6 +175,19 @@ class TrainingUploadResult(BaseModel):
     metadata_path: str
     provenance_status: ProvenanceStatus
     verification_summary: VerificationSummary | None = None
+    training_status: Literal["queued"] = "queued"
+
+
+class TrainingJobStatus(BaseModel):
+    model_config = ConfigDict(protected_namespaces=("model_dump",))
+
+    dataset_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    model_version: str | None = None
+    model_validated: bool | None = None
+    is_synthetic: bool | None = None
+    error: str | None = None
+    updated_at: str
 
 class TransferCandidate(BaseModel):
     donor_facility: str

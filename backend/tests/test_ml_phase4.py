@@ -31,6 +31,8 @@ from ml.train import (
     _validation_policy,
     _rule_scores,
 )
+from ml.train_synthetic import prepare_synthetic_feature_dataset
+from ml import train_uploaded_dataset
 from backend.app.validation import ValidationConfig, validate_inventory_csv
 from backend.app import ml_service
 from ml.train import _create_artifact_directory
@@ -693,44 +695,13 @@ def test_promotion_gate_rejects_each_failed_criterion(criterion):
 
 
 def _build_synthetic_feature_table(uploads_root: Path, output_root: Path) -> str:
-    source = generate_synthetic_supply_history(
-        facilities=48, periods=72, seed=17, frequency="monthly"
+    built = prepare_synthetic_feature_dataset(
+        data_root=uploads_root,
+        feature_root=output_root,
     )
-    config = ValidationConfig(
-        minimum_records_per_facility_item=24,
-        minimum_facility_items=1,
-        data_frequency="monthly",
-    )
-    validation = validate_inventory_csv(source, purpose="training", config=config)
-    assert validation["valid"] is True
-    dataset_id = "v1-20261016T120000Z-" + "b" * 32
-    upload_dir = uploads_root / "v1" / dataset_id
-    upload_dir.mkdir(parents=True)
-    data_path = upload_dir / "data.csv"
-    source.to_csv(data_path, index=False)
-    registry = {
-        "dataset_id": dataset_id,
-        "sha256": hashlib.sha256(data_path.read_bytes()).hexdigest(),
-        "row_count": len(source),
-        "date_range": validation["date_range"],
-        "is_synthetic": True,
-        "data_source": "uploaded",
-        "data_frequency": "monthly",
-    }
-    (upload_dir / "metadata.json").write_text(
-        json.dumps(registry, indent=2), encoding="utf-8"
-    )
-    built = build_dataset(
-        dataset_id,
-        frequency="monthly",
-        horizon=1,
-        minimum_records_per_facility_item=24,
-        minimum_facility_items=1,
-        minimum_positives=1,
-        uploads_root=uploads_root,
-        output_root=output_root,
-    )
-    return json.loads((built / "metadata.json").read_text(encoding="utf-8"))["build_id"]
+    metadata = json.loads((built / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["data_source"] == "synthetic_generated"
+    return metadata["build_id"]
 
 
 def test_synthetic_end_to_end_training_is_unvalidated_and_versioned(tmp_path):
@@ -813,4 +784,92 @@ def test_synthetic_end_to_end_training_is_unvalidated_and_versioned(tmp_path):
     assert (artifact / "feature_builder_state.json").is_file()
     assert (artifact / "evaluation_report.md").read_text(encoding="utf-8").startswith(
         "# SYNTHETIC - not evidence of real-world performance"
+    )
+
+
+def test_real_upload_training_rejects_synthetic_registered_dataset(monkeypatch, tmp_path):
+    source = generate_synthetic_supply_history(
+        facilities=2, periods=24, seed=17, frequency="monthly"
+    )
+    dataset_id = "v1-20261016T120000Z-" + "c" * 32
+    upload_dir = tmp_path / "v1" / dataset_id
+    upload_dir.mkdir(parents=True)
+    data_path = upload_dir / "data.csv"
+    source.to_csv(data_path, index=False)
+    registry = {
+        "dataset_id": dataset_id,
+        "sha256": hashlib.sha256(data_path.read_bytes()).hexdigest(),
+        "row_count": len(source),
+        "is_synthetic": True,
+        "data_source": "uploaded",
+    }
+    (upload_dir / "metadata.json").write_text(json.dumps(registry), encoding="utf-8")
+    monkeypatch.setattr(
+        train_uploaded_dataset,
+        "build_dataset",
+        lambda *args, **kwargs: pytest.fail("Synthetic upload must not reach feature building."),
+    )
+
+    with pytest.raises(ValueError, match="is_synthetic=false"):
+        train_uploaded_dataset.train_uploaded_candidate(dataset_id, uploads_root=tmp_path)
+
+
+def test_real_upload_training_builds_and_trains_registered_dataset(monkeypatch, tmp_path):
+    dataset_id = "v1-20261016T120000Z-" + "d" * 32
+    registry = {
+        "dataset_id": dataset_id,
+        "data_source": "uploaded",
+        "is_synthetic": False,
+    }
+    feature_dir = tmp_path / "features" / "build"
+    feature_dir.mkdir(parents=True)
+    (feature_dir / "metadata.json").write_text(
+        json.dumps({"build_id": "v1-feature-build"}),
+        encoding="utf-8",
+    )
+    artifact_dir = tmp_path / "models" / "candidate"
+    calls = {}
+
+    def build_dataset(actual_id, **kwargs):
+        calls["build"] = (actual_id, kwargs)
+        return feature_dir
+
+    def train_feature_dataset(actual_id, **kwargs):
+        calls["train"] = (actual_id, kwargs)
+        return artifact_dir
+
+    monkeypatch.setattr(
+        train_uploaded_dataset,
+        "_load_registered_dataset",
+        lambda actual_id, uploads_root: (pd.DataFrame(), registry, "a" * 64),
+    )
+    monkeypatch.setattr(train_uploaded_dataset, "build_dataset", build_dataset)
+    monkeypatch.setattr(
+        train_uploaded_dataset,
+        "train_feature_dataset",
+        train_feature_dataset,
+    )
+
+    result = train_uploaded_dataset.train_uploaded_candidate(
+        dataset_id,
+        uploads_root=tmp_path / "uploads",
+        feature_root=tmp_path / "features",
+        model_root=tmp_path / "models",
+        minimum_history_periods=30,
+        bootstrap_repetitions=1200,
+    )
+
+    assert result == artifact_dir
+    assert calls["build"] == (
+        dataset_id,
+        {"uploads_root": tmp_path / "uploads", "output_root": tmp_path / "features"},
+    )
+    assert calls["train"] == (
+        "v1-feature-build",
+        {
+            "feature_root": tmp_path / "features",
+            "model_root": tmp_path / "models",
+            "minimum_history_periods": 30,
+            "bootstrap_repetitions": 1200,
+        },
     )

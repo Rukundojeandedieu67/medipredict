@@ -32,19 +32,24 @@ def _zip_directory(source: Path, destination: Path) -> None:
                 archive.write(path, path.relative_to(source).as_posix())
 
 
-def _store_verified_artifact(key: str, archive_path: Path) -> str:
+def _store_verified_artifact(
+    key: str,
+    archive_path: Path,
+    *,
+    backend: str | None = None,
+) -> str:
     content = archive_path.read_bytes()
     if len(content) > MAX_ARTIFACT_BYTES:
         raise ValueError(f"Training artifact exceeds the {MAX_ARTIFACT_BYTES}-byte limit.")
     digest = _sha256(content)
     try:
-        write_object(key, content, backend="s3")
+        write_object(key, content, backend=backend)
     except ObjectStorageError as write_error:
         try:
             existing = read_object(
                 key,
                 max_bytes=MAX_ARTIFACT_BYTES,
-                backend="s3",
+                backend=backend,
             )
         except ObjectStorageError as read_error:
             raise ObjectStorageError(
@@ -58,7 +63,7 @@ def _store_verified_artifact(key: str, archive_path: Path) -> str:
     stored = read_object(
         key,
         max_bytes=MAX_ARTIFACT_BYTES,
-        backend="s3",
+        backend=backend,
     )
     if _sha256(stored) != digest:
         raise ObjectStorageError(f"Stored training artifact failed SHA-256 verification: {key}.")
@@ -74,10 +79,6 @@ def train_registered_dataset(
 ) -> models.ModelRelease:
     if not settings.database_enabled:
         raise RuntimeError("Enable MEDIPREDICT_DATABASE_ENABLED to run a training job.")
-    if settings.storage_backend != "s3":
-        raise RuntimeError(
-            "Set MEDIPREDICT_STORAGE_BACKEND=s3 to train registered R2 datasets."
-        )
     if minimum_history_periods < 1:
         raise ValueError("minimum_history_periods must be positive.")
     if bootstrap_repetitions < 1000:
@@ -134,8 +135,12 @@ def train_registered_dataset(
         _zip_directory(feature_directory, feature_zip)
         _zip_directory(model_directory, model_zip)
 
-        feature_bundle_sha256 = _store_verified_artifact(feature_key, feature_zip)
-        model_bundle_sha256 = _store_verified_artifact(model_key, model_zip)
+        feature_bundle_sha256 = _store_verified_artifact(
+            feature_key, feature_zip, backend=source_record.storage_backend
+        )
+        model_bundle_sha256 = _store_verified_artifact(
+            model_key, model_zip, backend=source_record.storage_backend
+        )
         artifact_hashes = model_metadata.get("artifact_sha256")
         if not isinstance(artifact_hashes, dict):
             raise ValueError("Model metadata is missing its artifact hashes.")
@@ -153,6 +158,7 @@ def train_registered_dataset(
             "feature_dataset_id": feature_build_id,
             "feature_table_sha256": feature_metadata["feature_table_sha256"],
             "training_policy": "manual_review_required",
+            "storage_backend": source_record.storage_backend,
         }
         release = models.ModelRelease(
             model_version=model_version,
@@ -178,7 +184,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Manually train and store a candidate from a validated dataset registered "
-            "in Aiven and Cloudflare R2. This does not promote or serve the model."
+            "in configured storage. This does not promote or serve the model."
         )
     )
     parser.add_argument("dataset_id", help="Dataset ID returned by the training-upload endpoint.")

@@ -5,7 +5,7 @@ import json
 import logging
 
 import pytest
-from fastapi import HTTPException, UploadFile
+from fastapi import BackgroundTasks, HTTPException, UploadFile
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -156,7 +156,8 @@ def test_training_upload_rejects_bad_files(monkeypatch):
     with pytest.raises(HTTPException) as error:
         asyncio.run(
             main.training_upload(
-                _upload(_csv(rows=1)),
+                file=_upload(_csv(rows=1)),
+                background_tasks=BackgroundTasks(),
                 x_admin_api_key="test-secret",
                 x_uploader=None,
             )
@@ -171,7 +172,14 @@ def test_training_upload_is_forbidden_without_admin_key(monkeypatch, tmp_path):
     monkeypatch.setattr(main.settings, "uploads_path", tmp_path / "uploads")
 
     with pytest.raises(HTTPException) as error:
-        asyncio.run(main.training_upload(_upload(_csv()), x_admin_api_key=None, x_uploader=None))
+        asyncio.run(
+            main.training_upload(
+                file=_upload(_csv()),
+                background_tasks=BackgroundTasks(),
+                x_admin_api_key=None,
+                x_uploader=None,
+            )
+        )
 
     assert error.value.status_code == 403
     assert not (tmp_path / "uploads").exists()
@@ -183,10 +191,13 @@ def test_training_upload_hashes_data_and_never_overwrites(
     content = _csv()
     monkeypatch.setattr(main.settings, "admin_api_key", "test-secret")
     monkeypatch.setattr(main.settings, "uploads_path", tmp_path / "uploads")
+    first_tasks = BackgroundTasks()
+    second_tasks = BackgroundTasks()
 
     first = asyncio.run(
         main.training_upload(
-            _upload(content),
+            file=_upload(content),
+            background_tasks=first_tasks,
             x_admin_api_key="test-secret",
             x_uploader="test-operator",
             db=database_session,
@@ -194,7 +205,8 @@ def test_training_upload_hashes_data_and_never_overwrites(
     )
     second = asyncio.run(
         main.training_upload(
-            _upload(content),
+            file=_upload(content),
+            background_tasks=second_tasks,
             x_admin_api_key="test-secret",
             x_uploader="test-operator",
             db=database_session,
@@ -204,6 +216,18 @@ def test_training_upload_hashes_data_and_never_overwrites(
     assert first.dataset_id != second.dataset_id
     assert first.sha256 == hashlib.sha256(content).hexdigest()
     assert second.sha256 == first.sha256
+    assert first.training_status == second.training_status == "queued"
+    assert len(first_tasks.tasks) == len(second_tasks.tasks) == 1
+    assert first_tasks.tasks[0].func is main._run_automatic_training
+    status = asyncio.run(
+        main.dataset_training_status(
+            first.dataset_id,
+            x_admin_api_key="test-secret",
+            db=database_session,
+        )
+    )
+    assert status.status == "queued"
+    assert status.is_synthetic is False
     for result in (first, second):
         directory = tmp_path / "uploads" / "v1" / result.dataset_id
         assert (directory / "data.csv").read_bytes() == content

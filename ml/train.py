@@ -103,8 +103,8 @@ def _load_feature_table(directory: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
         raise ValueError(f"Feature dataset metadata is missing: {', '.join(missing)}")
     if metadata.get("validation", {}).get("valid") is not True:
         raise ValueError("Feature dataset failed validation.")
-    if metadata["data_source"] != "uploaded":
-        raise ValueError("Feature dataset must originate from the registered upload pipeline.")
+    if metadata["data_source"] not in ("uploaded", "synthetic_generated"):
+        raise ValueError("Feature dataset must originate from a supported training pipeline.")
     if metadata["build_id"] != directory.name:
         raise ValueError("Feature build ID does not match the feature-table directory.")
     if metadata["frequency"] not in ("daily", "monthly") or int(metadata["horizon"]) < 1:
@@ -115,6 +115,8 @@ def _load_feature_table(directory: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
         raise ValueError("FeatureBuilder state does not match the feature dataset schema.")
     if not isinstance(metadata["is_synthetic"], bool):
         raise ValueError("Feature dataset is missing a valid is_synthetic metadata flag.")
+    if metadata["data_source"] == "synthetic_generated" and not metadata["is_synthetic"]:
+        raise ValueError("Generated synthetic feature datasets must be marked is_synthetic=true.")
     frame = pd.read_csv(features_path)
     required_columns = {
         "target", "time_split", "group_split", "facility_id", "date", "is_synthetic"
@@ -155,6 +157,18 @@ def _current_dataset_provenance(
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     if metadata.get("is_synthetic") is True:
         return "synthetic", None, None
+    recorded_status = metadata.get("provenance_status")
+    recorded_verification = metadata.get("verification")
+    dataset_hash = metadata.get("dataset_hash")
+    if (
+        recorded_status == "verified"
+        and isinstance(recorded_verification, dict)
+        and recorded_verification.get("dataset_sha256") == dataset_hash
+        and isinstance(dataset_hash, str)
+    ):
+        return "verified", recorded_verification, dataset_hash
+    if recorded_status == "uploaded_unverified":
+        return "uploaded_unverified", None, None
     dataset_id = metadata.get("dataset_id")
     if not isinstance(dataset_id, str) or not dataset_id:
         return "uploaded_unverified", None, None
