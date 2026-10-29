@@ -15,6 +15,7 @@ RUN python -m pip install --no-cache-dir \
 COPY backend ./backend
 COPY config ./config
 COPY ml ./ml
+COPY datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv ./datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv
 
 RUN useradd --system --uid 10001 --create-home app \
     && mkdir -p /data/uploads /app/ml/artifacts/feature_tables /app/ml/models \

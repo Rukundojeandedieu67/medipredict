@@ -9,7 +9,7 @@ For the staged Render, Vercel, and private AWS S3 deployment approach, see the [
 To use Aiven PostgreSQL (and Cloudflare R2 once its credentials are available):
 
 1. Copy `backend/.env.example` to `backend/.env`. Uncomment the Aiven connection URL and replace `REPLACE_WITH_URL_ENCODED_PASSWORD` with your Aiven password (URL-encode special characters). The host, port, user, database, and TLS mode are prefilled from your Aiven service details. Keep credentials in the ignored `.env` file; never commit them or put them in frontend settings.
-2. The screenshot provides no R2 bucket or S3 credentials, so keep `MEDIPREDICT_STORAGE_BACKEND=local` for now. When you have created an R2 bucket and S3 API token, enter those values, upload the dashboard CSV, set `MEDIPREDICT_DASHBOARD_DATA_KEY` to its object key, and then select `MEDIPREDICT_STORAGE_BACKEND=s3`.
+2. The screenshot provides no R2 bucket or S3 credentials, so keep `MEDIPREDICT_STORAGE_BACKEND=local` for now. When you have created an R2 bucket and S3 API token, enter those values, set `MEDIPREDICT_DASHBOARD_DATA_KEY` to the desired object key, and then select `MEDIPREDICT_STORAGE_BACKEND=s3`. In hosted Docker deployments, the approved dashboard CSV is included in the image and seeds/verifies that key on first read if it is missing.
 3. If the Aiven database is new and empty, first confirm the connection URL points to the intended database, then apply the existing schema from the repository root:
 
    ```powershell
@@ -105,7 +105,7 @@ Model promotion is a separate, reviewed release step: run the existing Phase 4 g
 
 ## Run with Docker Compose
 
-Docker Compose builds the API and static frontend. The API reads the repository dashboard CSV from its read-only bind mount and uses local storage; Compose does not require or use R2 credentials. The API database/uploads, feature tables, and model bundles use persistent Docker volumes. The `ml` profile provides separate feature-build and training entry points. Copy `.env.example` to `.env` before starting Compose if you need to configure the protected training-upload API key or ports. For a hosted deployment using R2, upload the dashboard CSV to the configured bucket and set `MEDIPREDICT_DASHBOARD_DATA_KEY` to its exact object key in the hosting service.
+Docker Compose builds the API and static frontend. The API reads the repository dashboard CSV from its read-only bind mount and uses local storage; Compose does not require or use R2 credentials. The API database/uploads, feature tables, and model bundles use persistent Docker volumes. The `ml` profile provides separate feature-build and training entry points. Copy `.env.example` to `.env` before starting Compose if you need to configure the protected training-upload API key or ports. The API image includes only the approved dashboard CSV needed for hosted startup; with R2 configured, it seeds and verifies a missing `MEDIPREDICT_DASHBOARD_DATA_KEY` from that file on first read.
 
 ```powershell
 docker compose up --build

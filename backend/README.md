@@ -2,7 +2,7 @@
 
 This project exposes its functionality through a FastAPI backend and a React dashboard in `frontend/`. The Vite development server proxies `/api` requests to the FastAPI backend.
 
-For Aiven PostgreSQL and Cloudflare R2, first copy `backend/.env.example` to `backend/.env`, fill in the Aiven connection URL and R2 bucket, endpoint, credentials, and dashboard CSV object key, then set `MEDIPREDICT_STORAGE_BACKEND=s3`. URL-encode special characters in the database password and keep all credentials in the ignored `.env` file. When the dashboard object is missing, the API seeds that exact key from `MEDIPREDICT_CSV_PATH` if the configured local CSV is available; otherwise upload the dashboard CSV to R2 first. Existing keys are immutable and are never overwritten.
+For Aiven PostgreSQL and Cloudflare R2, first copy `backend/.env.example` to `backend/.env`, fill in the Aiven connection URL and R2 bucket, endpoint, credentials, and dashboard CSV object key, then set `MEDIPREDICT_STORAGE_BACKEND=s3`. URL-encode special characters in the database password and keep all credentials in the ignored `.env` file. The hosted Docker image includes the approved default dashboard CSV; when the dashboard object is missing, the API seeds that exact key from `MEDIPREDICT_CSV_PATH` and verifies its SHA-256. For a different source CSV, upload it to the configured key first. Existing keys are immutable and are never overwritten.
 
 If the Aiven database is new and empty, verify the connection URL points to the intended database, then apply the existing schema from the repository root:
 

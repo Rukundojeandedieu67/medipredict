@@ -11,7 +11,12 @@
 **/dist
 .pytest_cache
 backups
-datasets
+datasets/*
+!datasets/medipredict_data/
+datasets/medipredict_data/*
+!datasets/medipredict_data/processed/
+datasets/medipredict_data/processed/*
+!datasets/medipredict_data/processed/medipredict_facility_timeseries_2026.csv
 ml/artifacts
 ml/models
 ml_engine/models_store
