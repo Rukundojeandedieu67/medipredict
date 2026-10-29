@@ -105,7 +105,7 @@ Model promotion is a separate, reviewed release step: run the existing Phase 4 g
 
 ## Run with Docker Compose
 
-Docker Compose builds the API and static frontend. The current dataset directory is mounted read-only; the API database/uploads, feature tables, and model bundles use persistent Docker volumes. The `ml` profile provides separate feature-build and training entry points. Copy `.env.example` to `.env` before starting Compose if you need to configure the protected training-upload API key or ports.
+Docker Compose builds the API and static frontend. The API reads the repository dashboard CSV from its read-only bind mount and uses local storage; Compose does not require or use R2 credentials. The API database/uploads, feature tables, and model bundles use persistent Docker volumes. The `ml` profile provides separate feature-build and training entry points. Copy `.env.example` to `.env` before starting Compose if you need to configure the protected training-upload API key or ports. For a hosted deployment using R2, upload the dashboard CSV to the configured bucket and set `MEDIPREDICT_DASHBOARD_DATA_KEY` to its exact object key in the hosting service.
 
 ```powershell
 docker compose up --build
