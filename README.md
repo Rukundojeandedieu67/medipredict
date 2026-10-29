@@ -6,17 +6,17 @@ For the staged Render, Vercel, and private AWS S3 deployment approach, see the [
 
 ## Run locally
 
-To use Aiven PostgreSQL and Cloudflare R2:
+To use Aiven PostgreSQL (and Cloudflare R2 once its credentials are available):
 
-1. Copy `backend/.env.example` to `backend/.env`. Uncomment and fill in the Aiven connection URL, then set the R2 backend, bucket, account endpoint, access credentials, and dashboard CSV object key. URL-encode special characters in the Aiven password. Keep credentials in the ignored `.env` file; never commit them or put them in frontend settings.
-2. Upload the existing dashboard CSV to your R2 bucket and set `MEDIPREDICT_DASHBOARD_DATA_KEY` to its object key. R2 replaces the local dashboard CSV source when `MEDIPREDICT_STORAGE_BACKEND=s3`.
+1. Copy `backend/.env.example` to `backend/.env`. Uncomment the Aiven connection URL and replace `REPLACE_WITH_URL_ENCODED_PASSWORD` with your Aiven password (URL-encode special characters). The host, port, user, database, and TLS mode are prefilled from your Aiven service details. Keep credentials in the ignored `.env` file; never commit them or put them in frontend settings.
+2. The screenshot provides no R2 bucket or S3 credentials, so keep `MEDIPREDICT_STORAGE_BACKEND=local` for now. When you have created an R2 bucket and S3 API token, enter those values, upload the dashboard CSV, set `MEDIPREDICT_DASHBOARD_DATA_KEY` to its object key, and then select `MEDIPREDICT_STORAGE_BACKEND=s3`.
 3. If the Aiven database is new and empty, first confirm the connection URL points to the intended database, then apply the existing schema from the repository root:
 
    ```powershell
    .\backend\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
    ```
 
-   Do not run this against a database containing existing application tables without checking its schema and migration state first.
+   The screenshot shows an existing Aiven service, but does not show whether `defaultdb` already contains application tables. Do not run migrations until its schema and migration state have been checked.
 4. Start the API from the repository root. Settings are loaded from `backend/.env`:
 
    ```powershell

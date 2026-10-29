@@ -61,6 +61,53 @@ CSV_COLUMNS = {"facility_name": "facility", "district": "district", "province": 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.debug("Starting %s API.", app.title)
+    if engine.dialect.name == "sqlite":
+        logger.warning(
+            "Using local SQLite; Aiven PostgreSQL is not configured. "
+            "Set MEDIPREDICT_DATABASE_URL to an Aiven connection URL to enable it."
+        )
+    else:
+        logger.info(
+            "Database backend %s configured; connectivity will be checked on first use.",
+            engine.dialect.name,
+        )
+
+    if not settings.database_enabled:
+        logger.warning(
+            "Database-backed features are disabled; "
+            "set MEDIPREDICT_DATABASE_ENABLED=true to enable them."
+        )
+
+    if settings.storage_backend == "local":
+        logger.warning(
+            "Using local file storage; Cloudflare R2 is not configured. "
+            "Set MEDIPREDICT_STORAGE_BACKEND=s3 and the R2 environment variables to enable it."
+        )
+    else:
+        required_object_store_settings = {
+            "MEDIPREDICT_OBJECT_STORE_BUCKET": settings.object_store_bucket,
+            "MEDIPREDICT_OBJECT_STORE_ENDPOINT_URL": settings.object_store_endpoint_url,
+            "MEDIPREDICT_OBJECT_STORE_ACCESS_KEY_ID": settings.object_store_access_key_id,
+            "MEDIPREDICT_OBJECT_STORE_SECRET_ACCESS_KEY": (
+                settings.object_store_secret_access_key
+            ),
+            "MEDIPREDICT_DASHBOARD_DATA_KEY": settings.dashboard_data_key,
+        }
+        missing_object_store_settings = [
+            name for name, value in required_object_store_settings.items() if not value
+        ]
+        if missing_object_store_settings:
+            logger.warning(
+                "Cloudflare R2 is selected but configuration is incomplete; missing: %s.",
+                ", ".join(missing_object_store_settings),
+            )
+        else:
+            logger.info(
+                "Cloudflare R2 configuration is present; connectivity will be checked "
+                "on the first object request."
+            )
+
     if settings.database_enabled and engine.dialect.name == "sqlite":
         Base.metadata.create_all(bind=engine)
     yield
