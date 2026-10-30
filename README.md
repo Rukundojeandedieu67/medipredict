@@ -6,6 +6,8 @@ MediPredict Rwanda is a medicine-supply monitoring prototype for exploring facil
 
 ## Start the dashboard
 
+Watch the [MediPredict Rwanda demo](https://www.youtube.com/watch?v=TR1rSModZm4).
+
 The quickest way to explore the demonstration is with Docker Compose:
 
 ```powershell
@@ -20,7 +22,7 @@ Then open:
 
 Stop the services with `Ctrl+C` or `docker compose down`. The default Compose setup keeps API data in named Docker volumes. Do not run `docker compose down -v` unless you intend to delete those volumes.
 
-For detailed screen-by-screen instructions, CSV preparation, interpretation guidance, and recommendations for responsible adoption, read the [End-User Guide](docs/user-guide.md).
+For detailed screen-by-screen instructions, CSV preparation, interpretation guidance, and recommendations for responsible adoption, read the [Hospital Dashboard User Guide](docs/user-guide.md).
 
 ## What users can do
 
@@ -44,7 +46,7 @@ Use the **Refresh Data** button to reload the current dashboard snapshot. The di
 - Do not upload patient-identifiable or otherwise sensitive information. The CSV intake is for facility-item inventory observations.
 - Dashboard alert acknowledgements and resolutions are saved in the current browser's local storage; they are not a shared or centrally audited workflow.
 
-For limitations, CSV handling, interpretation, and recommended next steps, see the [End-User Guide](docs/user-guide.md). For system status and data provenance, see [Dataset provenance](ml_engine/datasets/PROVENANCE.md) and [Data contract](docs/data_contract.md).
+For limitations, CSV handling, interpretation, and recommended next steps, see the [Hospital Dashboard User Guide](docs/user-guide.md). For system status and data provenance, see [Dataset provenance](ml_engine/datasets/PROVENANCE.md) and [Data contract](docs/data_contract.md).
 
 For the staged Render, Vercel, and private AWS S3 deployment approach, see the [deployment plan](docs/deployment_plan.md). Hosting is separate from local development. Local development can use Aiven PostgreSQL and Cloudflare R2, or run the CSV-only dashboard without a database.
 
@@ -58,7 +60,7 @@ The dashboard's **Model Insights** page is a governance and methodology view, no
 - **Data provenance:** Demonstration stock levels, consumption, and risk trajectories are synthetic; generated API records are marked `is_synthetic=true`. District indicators are unverified seed values and must not be cited as confirmed statistics.
 - **Evaluation integrity:** Model training and evaluation require temporal out-of-time splits. Random train/test splits are prohibited to avoid leakage across inventory timelines.
 
-Do not use the dashboard's outputs or any development results for clinical, procurement, allocation, or emergency-response decisions. See the [End-User Guide](docs/user-guide.md) for interpreting the dashboard and [Dataset provenance](ml_engine/datasets/PROVENANCE.md) for source details.
+Do not use the dashboard's outputs or any development results for clinical, procurement, allocation, or emergency-response decisions. See the [Hospital Dashboard User Guide](docs/user-guide.md) for interpreting the dashboard and [Dataset provenance](ml_engine/datasets/PROVENANCE.md) for source details.
 
 ## Run locally (development)
 
@@ -86,7 +88,7 @@ To use Aiven PostgreSQL (and Cloudflare R2 once its credentials are available):
    npm run dev
    ```
 
-6. Open `http://localhost:5173`. The optional shared demo login is `demo@medipredict.rw` / `RwandaDemo-ReadOnly-2026!`. It is read-only and cannot create users. For Render, add `MEDIPREDICT_AUTH_DEMO_EMAIL=demo@medipredict.rw` and `MEDIPREDICT_AUTH_DEMO_PASSWORD=RwandaDemo-ReadOnly-2026!` under the service's Environment settings. These are public demo credentials; anyone can use them to view the dashboard. Do not use them for an administrator.
+6. Open `http://localhost:5173`. The optional shared demo login is `demo001@gmail.com` / `RwandaDemo-ReadOnly-2026!`. It is read-only and cannot create users. For Render, add `MEDIPREDICT_AUTH_DEMO_EMAIL=demo001@gmail.com` and `MEDIPREDICT_AUTH_DEMO_PASSWORD=RwandaDemo-ReadOnly-2026!` under the service's Environment settings. These are public demo credentials; anyone can use them to view the dashboard. Do not use them for an administrator.
 
    Set `MEDIPREDICT_AUTH_INITIAL_ADMIN_EMAIL` and `MEDIPREDICT_AUTH_INITIAL_ADMIN_PASSWORD` separately to private credentials in Render. Admins can create standard accounts from the sidebar; public registration is disabled. Never publish or reuse an admin password. API docs are at `http://localhost:8000/docs`, and the OpenAPI schema is at `http://localhost:8000/openapi.json`.
 
