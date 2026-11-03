@@ -4,7 +4,7 @@ MediPredict Rwanda is a medicine-supply monitoring prototype for exploring facil
 
 > **Important — demonstration system:** The default inventory, consumption, and risk data are synthetic; district indicators include unverified seed values. Live classifications use rule-based days-of-cover calculations. A validated machine-learning model is **not** served. Do not use this prototype or its outputs to make clinical, procurement, allocation, or emergency-response decisions.
 > use this email: demo001@gmail.com
->  and password 🔑: as Demopassword 
+>  and password 🔑:Demopassword 
 
 ## Start the dashboard
 
