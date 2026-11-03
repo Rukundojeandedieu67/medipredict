@@ -3,6 +3,8 @@
 MediPredict Rwanda is a medicine-supply monitoring prototype for exploring facility inventory, stock-cover risk, alerts, and possible inter-facility transfers. It combines a React dashboard with a FastAPI service and a CSV-based data workflow.
 
 > **Important — demonstration system:** The default inventory, consumption, and risk data are synthetic; district indicators include unverified seed values. Live classifications use rule-based days-of-cover calculations. A validated machine-learning model is **not** served. Do not use this prototype or its outputs to make clinical, procurement, allocation, or emergency-response decisions.
+> use this email: demo001@gmail.com
+>  and password 🔑: as Demopassword 
 
 ## Start the dashboard
 
